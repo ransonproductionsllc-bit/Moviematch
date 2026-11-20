@@ -107,4 +107,4 @@ npm test
 
 ---
 
-This product uses the TMDB API but is not endorsed or certified by TMDB.
+This product uses the TMDB API but is not endorsed or certified by TMDB. Titles are set in [Instrument Serif](https://github.com/Instrument/instrument-serif), bundled under the SIL Open Font License (`public/fonts/InstrumentSerif-OFL.txt`).

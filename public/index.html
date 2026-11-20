@@ -4,34 +4,40 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>MovieMatch</title>
-  <meta name="theme-color" content="#0f0d14" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍿</text></svg>" />
+  <meta name="theme-color" content="#110f0e" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23110f0e'/><path d='M16 25s-8-5-10.4-9.8C4 12 5.8 8 9.8 8c2.3 0 4 1.4 6.2 3.6C18.2 9.4 19.9 8 22.2 8c4 0 5.8 4 4.2 7.2C24 20 16 25 16 25z' fill='%23f2b54a'/></svg>" />
+  <link rel="preload" href="/fonts/InstrumentSerif-Regular.ttf" as="font" type="font/ttf" crossorigin />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <div id="banner" class="banner" hidden></div>
   <header id="topbar" class="topbar" hidden>
-    <a href="#/" class="brand">🍿 <span>MovieMatch</span></a>
-    <nav class="nav">
-      <a href="#/" data-nav="dashboard">Dashboard</a>
+    <a href="#/" class="brand">Movie<em>Match</em></a>
+    <nav class="nav" aria-label="Main">
+      <a href="#/" data-nav="dashboard">Home</a>
       <a href="#/lists" data-nav="lists">Lists</a>
       <a href="#/match" data-nav="match">Match</a>
     </nav>
     <div class="who">
       <span id="whoName"></span>
-      <button id="logoutBtn" class="btn ghost small">Sign out</button>
+      <button id="logoutBtn" class="btn quiet small">Sign out</button>
     </div>
   </header>
   <main id="view" class="view"></main>
+  <nav id="tabbar" class="tabbar" aria-label="Main" hidden>
+    <a href="#/" data-nav="dashboard"><span data-icon="home"></span>Home</a>
+    <a href="#/match" data-nav="match"><span data-icon="heart"></span>Match</a>
+    <a href="#/lists" data-nav="lists"><span data-icon="list"></span>Lists</a>
+  </nav>
 
   <div id="modal" class="modal" hidden>
     <div class="modal-backdrop" data-close></div>
-    <div class="modal-card" role="dialog" aria-modal="true">
-      <button class="modal-close" data-close aria-label="Close">✕</button>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-label="Movie details">
+      <button class="modal-close icon-btn" data-close aria-label="Close"></button>
       <div id="modalBody"></div>
     </div>
   </div>
-  <div id="toast" class="toast" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script type="module" src="/app.js"></script>
 </body>

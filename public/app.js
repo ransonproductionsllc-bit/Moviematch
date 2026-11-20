@@ -9,6 +9,34 @@ const app = { status: null, user: null, timers: [], cleanups: [] };
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+/** One icon set: 24px grid, 1.75 stroke, round caps. */
+const ICONS = {
+  home: '<path d="M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1H15v-6H9v6H4.5a1 1 0 0 1-1-1z"/>',
+  list: '<path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>',
+  heart: '<path d="M12 20s-7.5-4.6-9.4-9.1C1.3 7.6 3.4 4.5 6.7 4.5c2.1 0 3.6 1.2 5.3 3.2 1.7-2 3.2-3.2 5.3-3.2 3.3 0 5.4 3.1 4.1 6.4C19.5 15.4 12 20 12 20z"/>',
+  x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5h.01"/>',
+  check: '<path d="M5 12.5 10 17.5 19.5 7"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  pencil: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+  dice: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 8.5h.01M15.5 8.5h.01M12 12h.01M8.5 15.5h.01M15.5 15.5h.01"/>',
+  play: '<path d="M8 5.5v13l10.5-6.5z"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/>',
+  user: '<circle cx="12" cy="8" r="3.5"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>',
+  left: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
+  right: '<path d="M9 6l6 6-6 6"/>',
+  film: '<rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M8 4v16M16 4v16M3.5 9H8M3.5 15H8M16 9h4.5M16 15h4.5"/>',
+  external: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  sliders: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+};
+const STAR = '<svg class="i fill" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg>';
+const icon = (name, label) =>
+  `<svg class="i" viewBox="0 0 24 24" ${label ? `role="img" aria-label="${esc(label)}"` : 'aria-hidden="true"'}>${ICONS[name]}</svg>`;
+
 async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch(path, {
     method,
@@ -33,7 +61,7 @@ function toast(msg, isErr = false) {
   t.className = 'toast' + (isErr ? ' err' : '');
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), 3200);
+  toastTimer = setTimeout(() => (t.hidden = true), 3000);
 }
 const fail = (err) => toast(err.message || String(err), true);
 
@@ -47,22 +75,25 @@ function debounce(fn, ms) {
 
 const fmtRuntime = (m) => (m ? `${Math.floor(m / 60)}h ${m % 60}m` : '');
 const firstName = (u) => (u?.displayName || u?.username || 'Partner').split(' ')[0];
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const timeAgo = (iso) => {
-  const s = (Date.now() - Date.parse(iso.replace(' ', 'T') + 'Z')) / 1000;
+  const d = new Date(iso.replace(' ', 'T') + 'Z');
+  const s = (Date.now() - d) / 1000;
   if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  if (s < 172800) return 'yesterday';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
-/** Poster image, or a generated gradient card when there is no artwork. */
-function poster(m, { rating = false, flag = '' } = {}) {
+/** Poster artwork, or a title card drawn in the page when there is none. */
+function poster(m, { score = false, watched = false, extra = '', mini = false } = {}) {
   const hue = (m.id * 47) % 360;
   const inner = m.posterUrl
-    ? `<img src="${esc(m.posterUrl)}" alt="${esc(m.title)} poster" loading="lazy" />`
-    : `<div class="ph" style="background:linear-gradient(160deg,hsl(${hue} 55% 38%),hsl(${(hue + 60) % 360} 50% 16%))">${esc(m.title)}<small>${esc(m.year || '')}</small></div>`;
-  const r = rating && m.rating ? `<span class="rating">★ ${m.rating.toFixed(1)}</span>` : '';
-  return `<div class="poster">${inner}${r}${flag ? `<span class="flag">${flag}</span>` : ''}</div>`;
+    ? `<img src="${esc(m.posterUrl)}" alt="" loading="lazy" />`
+    : `<div class="ph" style="background:radial-gradient(130% 90% at 20% 0%,hsl(${hue} 32% 30%),hsl(${(hue + 25) % 360} 28% 13%) 70%)"><b>${esc(m.title)}</b><span>${esc(m.year || '')}</span></div>`;
+  const r = score && m.rating ? `<span class="score">${STAR}${m.rating.toFixed(1)}</span>` : '';
+  return `<div class="poster${watched ? ' watched' : ''}${mini ? ' mini' : ''}" role="img" aria-label="${esc(m.title)} poster">${inner}${r}${extra}</div>`;
 }
 
 function stopTimers() {
@@ -71,6 +102,9 @@ function stopTimers() {
   app.cleanups.forEach((fn) => fn());
   app.cleanups = [];
 }
+
+const skeletonRow = (n = 6) =>
+  `<div class="strip">${Array.from({ length: n }, () => '<div><div class="skel" style="aspect-ratio:2/3"></div><div class="skel" style="height:14px;margin-top:10px;width:70%"></div></div>').join('')}</div>`;
 
 // ---------- routing ----------
 const routes = [
@@ -88,12 +122,18 @@ async function route() {
   for (const [re, fn, nav] of routes) {
     const m = hash.match(re);
     if (m) {
-      $$('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === nav));
-      view.innerHTML = '<p class="muted">Loading…</p>';
+      $$('[data-nav]').forEach((a) => {
+        a.classList.toggle('active', a.dataset.nav === nav);
+        a.toggleAttribute('aria-current', a.dataset.nav === nav);
+      });
+      view.innerHTML = `<div class="skel" style="height:44px;width:220px;margin-bottom:1.5rem"></div>${skeletonRow()}`;
       try {
         await fn(...m.slice(1));
+        view.style.animation = 'none';
+        void view.offsetWidth;
+        view.style.animation = '';
       } catch (err) {
-        if (app.user) view.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+        if (app.user) view.innerHTML = `<div class="empty">${icon('film')}<strong>Couldn’t load this page</strong>${esc(err.message)}</div>`;
       }
       window.scrollTo(0, 0);
       return;
@@ -105,12 +145,14 @@ window.addEventListener('hashchange', route);
 
 // ---------- boot ----------
 async function boot() {
+  $$('[data-icon]').forEach((el) => (el.outerHTML = icon(el.dataset.icon)));
+  $('.modal-close').innerHTML = icon('x');
   app.status = await api('/api/status');
   app.user = app.status.user;
-  const banner = $('#banner');
   if (app.status.mode === 'demo') {
+    const banner = $('#banner');
     banner.hidden = false;
-    banner.textContent = 'Demo mode: using a small built-in movie catalog. Add a TMDB API key to search every movie.';
+    banner.innerHTML = '<strong>Demo catalog</strong> · about 20 movies. Add a TMDB key to search every film.';
   }
   if (app.user) showChrome();
   route();
@@ -118,6 +160,7 @@ async function boot() {
 
 function showChrome() {
   $('#topbar').hidden = false;
+  $('#tabbar').hidden = false;
   $('#whoName').textContent = app.user.displayName;
 }
 
@@ -132,44 +175,43 @@ $('#logoutBtn').addEventListener('click', async () => {
 async function renderAuth() {
   stopTimers();
   $('#topbar').hidden = true;
+  $('#tabbar').hidden = true;
   app.status = await api('/api/status').catch(() => app.status);
   const canRegister = app.status?.registrationOpen;
   let mode = app.status?.userCount === 0 ? 'register' : 'login';
   const draw = () => {
+    const first = app.status.userCount === 0;
     view.innerHTML = `
       <div class="auth">
-        <div class="hero">
-          <div class="logo">🍿</div>
-          <h1>MovieMatch</h1>
-          <p class="muted">Your shared watchlist — and a tie-breaker for movie night.</p>
-        </div>
-        <div class="card">
-          ${canRegister ? `<div class="tabs">
-            <button data-mode="login" class="${mode === 'login' ? 'on' : ''}">Sign in</button>
-            <button data-mode="register" class="${mode === 'register' ? 'on' : ''}">Create account</button>
-          </div>` : ''}
-          <form id="authForm">
-            ${mode === 'register' ? `<p class="small muted">${app.status.userCount === 0 ? 'You’re the first of two people. Create your account, then have your partner create theirs.' : 'One spot left — this will be the second and final account.'}</p>
-            <div class="field"><label>Your name</label><input name="displayName" autocomplete="name" placeholder="e.g. Sam" required /></div>` : ''}
-            <div class="field"><label>Username</label><input name="username" autocomplete="username" required /></div>
-            <div class="field"><label>Password</label><input name="password" type="password" autocomplete="${mode === 'register' ? 'new-password' : 'current-password'}" required minlength="6" /></div>
-            <p class="error" id="authErr"></p>
-            <button class="btn" style="width:100%">${mode === 'register' ? 'Create account' : 'Sign in'}</button>
-          </form>
-        </div>
+        <div class="brand">Movie<em>Match</em></div>
+        <p class="lede">${mode === 'register'
+          ? first ? 'Create the first of two seats. Your partner takes the second one from this same address.' : 'One seat left — this will be the second and final account.'
+          : 'Your shared watchlist, and a tie-breaker for movie night.'}</p>
+        ${canRegister ? `<div class="seg" role="tablist">
+          <button type="button" role="tab" data-mode="login" class="${mode === 'login' ? 'on' : ''}">Sign in</button>
+          <button type="button" role="tab" data-mode="register" class="${mode === 'register' ? 'on' : ''}">Create account</button>
+        </div>` : ''}
+        <form id="authForm">
+          ${mode === 'register' ? '<div class="field"><label for="f-name">Your name</label><input id="f-name" name="displayName" autocomplete="given-name" placeholder="Sam" required /></div>' : ''}
+          <div class="field"><label for="f-user">Username</label><input id="f-user" name="username" autocomplete="username" autocapitalize="off" required /></div>
+          <div class="field"><label for="f-pass">Password</label><input id="f-pass" name="password" type="password" autocomplete="${mode === 'register' ? 'new-password' : 'current-password'}" required minlength="6" /></div>
+          <p class="error" id="authErr" role="alert"></p>
+          <button class="btn block">${mode === 'register' ? 'Create my account' : 'Sign in'}</button>
+        </form>
       </div>`;
     $$('[data-mode]').forEach((b) => b.addEventListener('click', () => { mode = b.dataset.mode; draw(); }));
     $('#authForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const body = Object.fromEntries(new FormData(e.target));
+      const btn = $('button.btn', e.target);
+      btn.disabled = true;
       try {
-        const { user } = await api(`/api/auth/${mode}`, { method: 'POST', body });
+        const { user } = await api(`/api/auth/${mode}`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
         app.user = user;
         showChrome();
-        location.hash = '#/';
         route();
       } catch (err) {
         $('#authErr').textContent = err.message;
+        btn.disabled = false;
       }
     });
   };
@@ -177,136 +219,155 @@ async function renderAuth() {
 }
 
 // ---------- dashboard ----------
+function tonightPanel(d) {
+  const r = d.round;
+  const pName = d.partner ? firstName(d.partner) : 'your partner';
+  if (!d.partner) {
+    return `<section class="tonight">
+      <div><h2>Waiting for your second seat</h2><p>Your partner can create their account from this same address. Until then, start filling your lists.</p></div>
+      <a class="btn ghost" href="#/lists">${icon('plus')}Add movies</a>
+    </section>`;
+  }
+  if (!r) {
+    return `<section class="tonight">
+      <div><h2>Can’t agree on a movie?</h2><p>Swipe through both your lists together. Anything you both like becomes a match.</p></div>
+      <a class="btn" href="#/match">${icon('heart')}Start matching</a>
+    </section>`;
+  }
+  const left = r.poolSize - r.mySwipes;
+  const meter = (label, n, cls) => `<div class="meter ${cls}"><span>${label} · ${n}/${r.poolSize}</span><div class="track"><div class="fill" style="width:${r.poolSize ? (n / r.poolSize) * 100 : 0}%"></div></div></div>`;
+  const head = r.chosen
+    ? `<div class="chosen">${poster(r.chosen, { mini: true })}<div><span class="label">Tonight’s pick</span><h2>${esc(r.chosen.title)}</h2><p>${[r.chosen.year, fmtRuntime(r.chosen.runtime)].filter(Boolean).join(' · ')}</p></div></div>`
+    : `<div><h2>${r.matches.length ? `${plural(r.matches.length, 'match')} so far` : 'Match round in progress'}</h2>
+        <p>${r.matches.length ? 'Pick one for tonight, or keep swiping for more.' : r.myDone ? `You’re done — waiting on ${esc(pName)}.` : `${plural(left, 'movie')} left for you to swipe.`}</p>
+        <div class="bars">${meter('You', r.mySwipes, '')}${meter(esc(pName), r.partnerSwipes, 'partner')}</div></div>`;
+  const cta = r.myDone || r.chosen
+    ? `<a class="btn ${r.chosen ? 'ghost' : ''}" href="#/match">${r.chosen ? 'Open round' : 'See matches'}</a>`
+    : `<a class="btn" href="#/match">${icon('heart')}Keep swiping</a>`;
+  const picks = r.matches.length && !r.chosen
+    ? `<div class="picks">${r.matches.map((m) => `<div data-movie="${m.id}" title="${esc(m.title)}">${poster(m, { mini: true })}</div>`).join('')}</div>`
+    : '';
+  return `<section class="tonight">${head}${cta}${picks}</section>`;
+}
+
+function movieCard(m, { sub = '', by = '' } = {}) {
+  return `<div class="mcard" data-movie="${m.id}">${poster(m, { score: true })}
+    <div class="t">${esc(m.title)}</div>
+    ${sub ? `<div class="s">${sub}</div>` : ''}${by}</div>`;
+}
+
 async function renderDashboard() {
   const d = await api('/api/dashboard');
   const pName = d.partner ? firstName(d.partner) : null;
-  const hour = new Date().getHours();
-  const hello = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const r = d.round;
-
-  const matchCard = r
-    ? `<div class="card match-cta">
-        <div class="emoji">💘</div>
-        <div class="spacer">
-          <h2>Match round in progress</h2>
-          <p class="muted" style="margin:0">You’ve swiped ${r.mySwipes}/${r.poolSize}${d.partner ? ` · ${esc(pName)} ${r.partnerSwipes}/${r.poolSize}` : ''} · <strong>${r.matches.length} match${r.matches.length === 1 ? '' : 'es'}</strong>${r.chosen ? ` · Tonight: <strong>${esc(r.chosen.title)}</strong>` : ''}</p>
-        </div>
-        <a class="btn" href="#/match">${r.myDone ? 'See matches' : 'Keep swiping'}</a>
-      </div>`
-    : `<div class="card match-cta">
-        <div class="emoji">🎬</div>
-        <div class="spacer">
-          <h2>Can’t decide what to watch?</h2>
-          <p class="muted" style="margin:0">Start a match round — you both swipe through movies from your lists, and anything you both like is a match.</p>
-        </div>
-        <a class="btn" href="#/match">Start matching</a>
-      </div>`;
-
-  const groups = {
-    joint: d.lists.filter((l) => l.kind === 'joint'),
-    mine: d.lists.filter((l) => l.mine),
-    partner: d.lists.filter((l) => l.kind === 'personal' && !l.mine),
-  };
-
+  const meName = firstName(d.me);
+  const groups = [
+    ...d.lists.filter((l) => l.kind === 'joint'),
+    ...d.lists.filter((l) => l.mine),
+    ...d.lists.filter((l) => l.kind === 'personal' && !l.mine),
+  ];
   const tasteBars = (rows, cls) => {
-    if (!rows.length) return '<p class="muted small">Add some movies to see this.</p>';
+    if (!rows.length) return '<p class="muted small">No picks yet.</p>';
     const max = Math.max(...rows.map((x) => x.count));
-    return rows
-      .map((x) => `<div class="bar ${cls}"><span class="g">${esc(x.genre)}</span><span class="track"><span class="fill" style="width:${(x.count / max) * 100}%;display:block"></span></span><span>${x.count}</span></div>`)
-      .join('');
+    return rows.map((x) => `<div class="bar ${cls}"><span>${esc(x.genre)}</span><span class="track"><span class="fill" style="width:${(x.count / max) * 100}%;display:block"></span></span><span class="n">${x.count}</span></div>`).join('');
   };
 
   view.innerHTML = `
-    <div class="greet">
-      <div class="spacer">
-        <h1>${hello}, ${esc(firstName(d.me))} 👋</h1>
-        <p class="muted" style="margin:0">${d.partner ? `Sharing MovieMatch with <strong>${esc(d.partner.displayName)}</strong>.` : 'Waiting for your partner to create their account — they can sign up from this same site.'}</p>
-      </div>
+    <div class="home-head">
+      <h1 class="title-xl spacer">Tonight</h1>
+      <p class="meta"><span class="seat-me"><b>${esc(meName)}</b> ${d.stats.myPicks} picks</span>${d.partner ? ` · <span class="seat-partner"><b>${esc(pName)}</b> ${d.stats.partnerPicks} picks</span>` : ''} · ${d.stats.watched} watched</p>
     </div>
 
-    <div class="stats">
-      <div class="stat"><div class="n">${d.stats.myPicks}</div><div class="l">Your picks</div></div>
-      <div class="stat"><div class="n">${d.stats.partnerPicks}</div><div class="l">${d.partner ? `${esc(pName)}’s picks` : 'Partner’s picks'}</div></div>
-      <div class="stat"><div class="n">${d.stats.joint}</div><div class="l">On joint lists</div></div>
-      <div class="stat"><div class="n">${d.stats.overlap}</div><div class="l">You both want</div></div>
-      <div class="stat"><div class="n">${d.stats.watched}</div><div class="l">Watched</div></div>
-    </div>
+    ${tonightPanel(d)}
 
-    ${matchCard}
-
-    <div class="section">
-      <div class="section-head"><h2>🤝 You both want to watch</h2><span class="muted small">On both of your lists</span></div>
+    <section class="section">
+      <div class="section-head"><h2>On both your lists</h2><span class="muted small">${d.overlap.length ? 'Already agreed — no swiping needed' : ''}</span></div>
       ${d.overlap.length
-        ? `<div class="strip">${d.overlap.map((m) => `<div class="mcard" data-movie="${m.id}">${poster(m, { rating: true })}<div class="t">${esc(m.title)}</div><div class="s">${esc(m.year || '')}</div></div>`).join('')}</div>`
-        : `<div class="empty">No overlap yet. When you both add the same movie, it shows up here — an instant agreement.</div>`}
-    </div>
+        ? `<div class="strip">${d.overlap.map((m) => movieCard(m, { sub: [m.year, fmtRuntime(m.runtime)].filter(Boolean).join(' · ') })).join('')}</div>`
+        : `<div class="empty">${icon('users')}<strong>Nothing in common yet</strong>When you both add the same movie, it shows up here.</div>`}
+    </section>
 
-    <div class="section">
-      <div class="section-head"><h2>Your lists</h2><span class="spacer"></span><a class="btn ghost small" href="#/lists">Manage lists</a></div>
-      <div class="lists-grid">
-        ${[...groups.joint, ...groups.mine, ...groups.partner].map(listTile).join('')}
-      </div>
-    </div>
-
-    <div class="section">
+    <section class="section">
       <div class="section-head"><h2>Recently added</h2></div>
       ${d.recent.length
-        ? `<div class="strip">${d.recent.map((i) => `<div class="mcard" data-movie="${i.movie.id}">${poster(i.movie, { rating: true })}<div class="t">${esc(i.movie.title)}</div><div class="s">${esc(i.addedByName || '')} · ${esc(i.listName)}<br>${timeAgo(i.addedAt)}</div></div>`).join('')}</div>`
-        : `<div class="empty">Nothing yet — open a list and type a movie name to add it.</div>`}
-    </div>
+        ? `<div class="strip">${d.recent.map((i) => movieCard(i.movie, {
+            sub: `${esc(i.listName)}`,
+            by: `<div class="s by ${i.addedBy === d.me.id ? 'me' : ''}">${i.addedBy === d.me.id ? 'You' : esc(i.addedByName || '')} · ${timeAgo(i.addedAt)}</div>`,
+          })).join('')}</div>`
+        : `<div class="empty">${icon('film')}<strong>No movies yet</strong><a href="#/lists">Open a list</a> and type a title to add one.</div>`}
+    </section>
 
-    <div class="section">
-      <div class="section-head"><h2>Taste check</h2><span class="muted small">Top genres across each of your picks</span></div>
+    <section class="section">
+      <div class="section-head"><h2>Lists</h2><span class="spacer"></span><a class="btn quiet small" href="#/lists">All lists ${icon('right')}</a></div>
+      <div class="list-rows">${groups.map(listRow).join('')}</div>
+    </section>
+
+    ${d.partner ? `<section class="section">
+      <div class="section-head"><h2>Taste check</h2><span class="muted small">Top genres in each of your picks</span></div>
       <div class="taste">
-        <div class="card"><h3>${esc(firstName(d.me))}</h3>${tasteBars(d.tastes.me, '')}</div>
-        <div class="card"><h3>${d.partner ? esc(pName) : 'Partner'}</h3>${tasteBars(d.tastes.partner, 'p')}</div>
+        <div><h3 class="seat-me">${esc(meName)}</h3>${tasteBars(d.tastes.me, '')}</div>
+        <div><h3 class="seat-partner">${esc(pName)}</h3>${tasteBars(d.tastes.partner, 'p')}</div>
       </div>
-    </div>`;
+    </section>` : ''}`;
   bindMovieClicks(view);
 }
 
-function listTile(l) {
-  const chip = l.kind === 'joint' ? '<span class="chip joint">👥 Joint</span>' : l.mine ? '<span class="chip mine">Mine</span>' : '<span class="chip partner">Partner’s · view only</span>';
-  return `<a class="card list-tile" href="#/lists/${l.id}">
-    ${chip}
-    <h3>${esc(l.name)}</h3>
-    <div class="muted small">${l.itemCount} movie${l.itemCount === 1 ? '' : 's'}${l.watchedCount ? ` · ${l.watchedCount} watched` : ''}</div>
+function listRow(l) {
+  const tag = l.kind === 'joint'
+    ? `<span class="tag joint">${icon('users')}Joint</span>`
+    : l.mine ? `<span class="tag">${icon('user')}Yours</span>` : `<span class="tag partner">${icon('eye')}View only</span>`;
+  const stack = l.preview?.length
+    ? l.preview.map((m) => poster(m, { mini: true })).join('')
+    : '<span class="empty-stack"></span>';
+  return `<a class="list-row" href="#/lists/${l.id}">
+    <span class="stack">${stack}</span>
+    <span class="spacer"><span class="name">${esc(l.name)}</span>
+      <span class="sub">${tag}<span>${plural(l.itemCount, 'movie')}${l.watchedCount ? ` · ${l.watchedCount} watched` : ''}</span></span></span>
+    ${icon('right')}
   </a>`;
 }
 
 function bindMovieClicks(root) {
-  $$('[data-movie]', root).forEach((el) =>
-    el.addEventListener('click', (e) => {
+  $$('[data-movie]', root).forEach((el) => {
+    el.tabIndex = 0;
+    const open = (e) => {
       if (e.target.closest('button')) return;
       openMovie(Number(el.dataset.movie));
-    })
-  );
+    };
+    el.addEventListener('click', open);
+    el.addEventListener('keydown', (e) => e.key === 'Enter' && open(e));
+  });
 }
 
 // ---------- lists overview ----------
 async function renderLists() {
   const { lists } = await api('/api/lists');
-  const sec = (title, items, hint) => `
-    <div class="section">
+  const sec = (title, items, hint) => items.length ? `
+    <section class="section">
       <div class="section-head"><h2>${title}</h2><span class="muted small">${hint}</span></div>
-      ${items.length ? `<div class="lists-grid">${items.map(listTile).join('')}</div>` : '<div class="empty">None yet.</div>'}
-    </div>`;
+      <div class="list-rows">${items.map(listRow).join('')}</div>
+    </section>` : '';
+  let kind = 'personal';
   view.innerHTML = `
-    <h1>Lists</h1>
-    <form id="newList" class="card row" style="margin-top:1rem">
-      <div style="flex:2;min-width:200px"><label>New list name</label><input name="name" placeholder="e.g. Halloween marathon" maxlength="60" required /></div>
-      <div style="flex:1;min-width:160px"><label>Type</label>
-        <select name="kind"><option value="personal">Personal (just me)</option><option value="joint">Joint (both of us)</option></select>
+    <h1 class="title-xl">Lists</h1>
+    <form id="newList" class="new-list">
+      <input name="name" placeholder="New list name" maxlength="60" required aria-label="New list name" />
+      <div class="seg" role="radiogroup" aria-label="Who can edit">
+        <button type="button" data-kind="personal" class="on">Just me</button>
+        <button type="button" data-kind="joint">Both of us</button>
       </div>
-      <button class="btn" style="align-self:flex-end">Create list</button>
+      <button class="btn">${icon('plus')}Create list</button>
     </form>
-    ${sec('👥 Joint lists', lists.filter((l) => l.kind === 'joint'), 'Both of you can add and edit')}
-    ${sec('My lists', lists.filter((l) => l.mine), 'Only you can edit — your partner can see them')}
-    ${sec('Partner’s lists', lists.filter((l) => l.kind === 'personal' && !l.mine), 'View only')}`;
+    ${sec('Joint', lists.filter((l) => l.kind === 'joint'), 'Both of you can add and edit')}
+    ${sec('Yours', lists.filter((l) => l.mine), 'Only you can edit · your partner can see them')}
+    ${sec('Your partner’s', lists.filter((l) => l.kind === 'personal' && !l.mine), 'View only')}`;
+  $$('[data-kind]').forEach((b) => b.addEventListener('click', () => {
+    kind = b.dataset.kind;
+    $$('[data-kind]').forEach((x) => x.classList.toggle('on', x === b));
+  }));
   $('#newList').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      const { list } = await api('/api/lists', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+      const { list } = await api('/api/lists', { method: 'POST', body: { name: e.target.name.value, kind } });
       location.hash = `#/lists/${list.id}`;
     } catch (err) { fail(err); }
   });
@@ -318,39 +379,52 @@ async function renderList(id) {
   let data = await api(`/api/lists/${id}`);
   const { list } = data;
 
-  const kindChip = list.kind === 'joint' ? '<span class="chip joint">👥 Joint list</span>' : list.mine ? '<span class="chip mine">My list</span>' : `<span class="chip partner">${esc(list.owner?.displayName || 'Partner')}’s list · view only</span>`;
+  const tag = list.kind === 'joint'
+    ? `<span class="tag joint">${icon('users')}Joint list · you both can edit</span>`
+    : list.mine ? `<span class="tag">${icon('user')}Your list</span>` : `<span class="tag partner">${icon('eye')}${esc(list.owner?.displayName || 'Partner')}’s list · view only</span>`;
 
   view.innerHTML = `
+    <div class="crumbs">
+      <a href="#/lists" class="back spacer">${icon('left')}Lists</a>
+      ${list.canEdit ? `<button class="btn quiet small" id="renameBtn">${icon('pencil')}Rename</button>
+        <button class="btn danger small" id="deleteBtn">${icon('trash')}Delete</button>` : ''}
+    </div>
     <div class="list-head">
       <div class="spacer">
-        <a href="#/lists" class="muted small">← All lists</a>
-        <h1 style="margin-top:0.4rem" id="listName">${esc(list.name)}</h1>
-        ${kindChip}
+        <h1 class="title-xl" id="listName">${esc(list.name)}</h1>
+        ${tag}
       </div>
-      ${list.canEdit ? `<div class="row"><button class="btn ghost small" id="renameBtn">Rename</button><button class="btn danger small" id="deleteBtn">Delete list</button></div>` : ''}
     </div>
     ${list.canEdit ? `
     <div class="adder">
-      <input id="addInput" placeholder="Type a movie name and press Enter…" autocomplete="off" />
-      <div class="suggest" id="suggest" hidden></div>
+      ${icon('search')}
+      <input id="addInput" placeholder="Add a movie — type a title" autocomplete="off" aria-label="Add a movie by title" role="combobox" aria-expanded="false" aria-controls="suggest" />
+      <div class="suggest" id="suggest" role="listbox" hidden></div>
     </div>` : ''}
-    <div class="row" style="margin-bottom:1rem">
-      <div class="tabs" style="margin:0">
+    <div class="toolbar">
+      <div class="seg" role="tablist" aria-label="Filter">
         <button data-f="towatch" class="on">To watch</button>
         <button data-f="watched">Watched</button>
         <button data-f="all">All</button>
       </div>
       <span class="spacer"></span>
-      <select id="sortSel" style="width:auto">
+      <select id="sortSel" aria-label="Sort">
         <option value="added">Recently added</option>
         <option value="rating">Highest rated</option>
-        <option value="title">Title</option>
+        <option value="title">A–Z</option>
         <option value="runtime">Shortest first</option>
       </select>
     </div>
     <div id="grid"></div>`;
 
+  const counts = () => {
+    const w = data.items.filter((i) => i.watched).length;
+    const labels = { towatch: `To watch ${data.items.length - w}`, watched: `Watched ${w}`, all: `All ${data.items.length}` };
+    $$('[data-f]').forEach((b) => (b.textContent = labels[b.dataset.f]));
+  };
+
   const drawGrid = () => {
+    counts();
     let items = data.items.filter((i) => (filter === 'all' ? true : filter === 'watched' ? i.watched : !i.watched));
     const cmp = {
       added: () => 0,
@@ -359,25 +433,30 @@ async function renderList(id) {
       runtime: (a, b) => (a.movie.runtime || 999) - (b.movie.runtime || 999),
     }[sort];
     items = [...items].sort(cmp);
+    const tools = (i) => list.canEdit ? `<div class="tools">
+        <button class="icon-btn ${i.watched ? 'on' : ''}" data-watch="${i.id}" aria-pressed="${i.watched}" aria-label="${i.watched ? 'Watched — mark as not watched' : 'Mark as watched'}" title="${i.watched ? 'Watched' : 'Mark as watched'}">${icon('check')}</button>
+        <button class="icon-btn" data-remove="${i.id}" aria-label="Remove ${esc(i.movie.title)}" title="Remove from list">${icon('x')}</button>
+      </div>` : '';
     $('#grid').innerHTML = items.length
       ? `<div class="movie-grid">${items.map((i) => `
-          <div class="mcard ${i.watched ? 'watched' : ''}" data-movie="${i.movie.id}">
-            ${poster(i.movie, { rating: true, flag: i.watched ? '<span class="chip badge-watched">✓ Watched</span>' : '' })}
-            <div class="t">${esc(i.movie.title)} <span class="muted" style="font-weight:500">${esc(i.movie.year || '')}</span></div>
-            <div class="s">${[i.movie.director && `Dir. ${esc(i.movie.director)}`, fmtRuntime(i.movie.runtime)].filter(Boolean).join(' · ')}</div>
-            ${list.kind === 'joint' && i.addedByName ? `<div class="s">Added by ${esc(i.addedByName)}</div>` : ''}
-            ${list.canEdit ? `<div class="actions">
-              <button class="btn secondary small" data-watch="${i.id}">${i.watched ? 'Unwatch' : '✓ Watched'}</button>
-              <button class="btn ghost small" data-remove="${i.id}" title="Remove from list">✕</button>
-            </div>` : ''}
+          <div class="mcard" data-movie="${i.movie.id}">
+            ${poster(i.movie, { score: true, watched: i.watched, extra: tools(i) })}
+            <div class="t">${esc(i.movie.title)} <span>${esc(i.movie.year || '')}</span></div>
+            <div class="s">${[i.movie.director, fmtRuntime(i.movie.runtime)].filter(Boolean).map(esc).join(' · ')}</div>
+            ${list.kind === 'joint' && i.addedByName ? `<div class="s by ${i.addedBy === app.user.id ? 'me' : ''}">Added by ${i.addedBy === app.user.id ? 'you' : esc(i.addedByName)}</div>` : ''}
           </div>`).join('')}</div>`
-      : `<div class="empty">${filter === 'watched' ? 'Nothing watched yet.' : list.canEdit ? 'This list is empty. Type a movie name above to add one — title, cast, crew and trailer are pulled in automatically.' : 'This list is empty.'}</div>`;
+      : filter === 'watched'
+        ? `<div class="empty">${icon('check')}<strong>Nothing watched yet</strong>Tap the check on a poster after movie night.</div>`
+        : data.items.length
+          ? `<div class="empty">${icon('check')}<strong>All caught up</strong>Everything on this list has been watched.</div>`
+          : `<div class="empty">${icon('film')}<strong>This list is empty</strong>${list.canEdit ? 'Type a title above. Poster, cast, crew and trailer fill in on their own.' : ''}</div>`;
     bindMovieClicks($('#grid'));
     $$('[data-watch]').forEach((b) => b.addEventListener('click', async () => {
       const item = data.items.find((i) => i.id === Number(b.dataset.watch));
       try {
         await api(`/api/lists/${list.id}/items/${item.id}`, { method: 'PATCH', body: { watched: !item.watched } });
         item.watched = !item.watched;
+        toast(item.watched ? `Marked ${item.movie.title} as watched` : `${item.movie.title} is back on the to-watch list`);
         drawGrid();
       } catch (err) { fail(err); }
     }));
@@ -387,6 +466,7 @@ async function renderList(id) {
       try {
         await api(`/api/lists/${list.id}/items/${item.id}`, { method: 'DELETE' });
         data.items = data.items.filter((i) => i !== item);
+        toast(`Removed ${item.movie.title}`);
         drawGrid();
       } catch (err) { fail(err); }
     }));
@@ -412,7 +492,7 @@ async function renderList(id) {
     } catch (err) { fail(err); }
   });
   $('#deleteBtn').addEventListener('click', async () => {
-    if (!confirm(`Delete “${list.name}” and its ${data.items.length} movies? This can’t be undone.`)) return;
+    if (!confirm(`Delete “${list.name}” and its ${plural(data.items.length, 'movie')}? This can’t be undone.`)) return;
     try {
       await api(`/api/lists/${list.id}`, { method: 'DELETE' });
       location.hash = '#/lists';
@@ -423,15 +503,22 @@ async function renderList(id) {
   const input = $('#addInput');
   const box = $('#suggest');
   let results = [], hi = 0, seq = 0;
+  const onList = () => new Set(data.items.map((i) => i.movie.id));
 
+  const show = (html) => {
+    box.hidden = !html;
+    input.setAttribute('aria-expanded', String(!!html));
+    if (html) box.innerHTML = html;
+  };
   const drawSuggest = () => {
-    if (!results.length) { box.hidden = true; return; }
-    box.hidden = false;
-    box.innerHTML = results.map((r, i) => `
-      <button type="button" data-i="${i}" class="${i === hi ? 'hi' : ''}">
-        <span class="thumb">${poster(r)}</span>
-        <span><strong>${esc(r.title)}</strong> <span class="muted">${esc(r.year || '')}</span><span class="ov">${esc(r.overview || '')}</span></span>
-      </button>`).join('');
+    if (!results.length) return show('');
+    const have = onList();
+    show(results.map((r, i) => `
+      <button type="button" role="option" data-i="${i}" class="${i === hi ? 'hi' : ''}" aria-selected="${i === hi}">
+        <span class="thumb">${poster(r, { mini: true })}</span>
+        <span class="spacer"><strong>${esc(r.title)}</strong> <span class="muted">${esc(r.year || '')}</span><span class="ov">${have.has(r.id) ? 'Already on this list' : esc(r.overview || '')}</span></span>
+        ${have.has(r.id) ? icon('check') : icon('plus')}
+      </button>`).join(''));
     $$('button', box).forEach((b) => b.addEventListener('mousedown', (e) => { e.preventDefault(); add(results[Number(b.dataset.i)]); }));
   };
 
@@ -439,43 +526,46 @@ async function renderList(id) {
     const qv = input.value.trim();
     const mine = ++seq;
     if (qv.length < 2) { results = []; return drawSuggest(); }
+    show('<div class="hint">Searching…</div>');
     try {
       const { results: r } = await api(`/api/movies/search?q=${encodeURIComponent(qv)}`);
       if (mine !== seq) return;
-      results = r; hi = 0; drawSuggest();
-      if (!r.length) { box.hidden = false; box.innerHTML = `<div class="muted small" style="padding:0.8rem">No movies found for “${esc(qv)}”.</div>`; }
+      results = r; hi = 0;
+      if (r.length) drawSuggest();
+      else show(`<div class="hint">No movies match “${esc(qv)}”. Check the spelling, or try fewer words.</div>`);
     } catch (err) { fail(err); }
-  }, 250);
+  }, 220);
 
   async function add(pick) {
     const title = input.value.trim();
     if (!pick && !title) return;
     input.disabled = true;
+    show('<div class="hint">Adding and pulling in cast, crew and trailer…</div>');
     try {
       const { item } = await api(`/api/lists/${list.id}/items`, { method: 'POST', body: pick ? { tmdbId: pick.id } : { title } });
       toast(`Added ${item.movie.title}${item.movie.year ? ` (${item.movie.year})` : ''}`);
-      input.value = ''; results = []; drawSuggest();
+      input.value = ''; results = []; show('');
       data = await api(`/api/lists/${list.id}`);
       if (filter === 'watched') { filter = 'towatch'; $$('[data-f]').forEach((x) => x.classList.toggle('on', x.dataset.f === 'towatch')); }
       drawGrid();
-    } catch (err) { fail(err); }
+    } catch (err) { fail(err); drawSuggest(); }
     input.disabled = false;
     input.focus();
   }
 
   input.addEventListener('input', search);
-  input.addEventListener('blur', () => setTimeout(() => (box.hidden = true), 150));
+  input.addEventListener('blur', () => setTimeout(() => show(''), 150));
   input.addEventListener('focus', () => results.length && drawSuggest());
   input.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown' && results.length) { hi = (hi + 1) % results.length; drawSuggest(); e.preventDefault(); }
     else if (e.key === 'ArrowUp' && results.length) { hi = (hi - 1 + results.length) % results.length; drawSuggest(); e.preventDefault(); }
-    else if (e.key === 'Escape') { box.hidden = true; }
+    else if (e.key === 'Escape') show('');
     else if (e.key === 'Enter') { e.preventDefault(); add(results[hi] || null); }
   });
-  input.focus();
+  if (matchMedia('(pointer: fine)').matches) input.focus();
 }
 
-// ---------- movie detail modal ----------
+// ---------- movie detail ----------
 function closeModal() {
   const m = $('#modal');
   if (m.hidden) return;
@@ -489,14 +579,14 @@ document.addEventListener('keydown', (e) => e.key === 'Escape' && closeModal());
 async function openMovie(id) {
   const modal = $('#modal');
   const body = $('#modalBody');
-  body.innerHTML = '<div style="padding:3rem;text-align:center" class="muted">Loading…</div>';
+  if (modal.hidden) body.innerHTML = '<div style="padding:2rem;display:flex;gap:1.5rem"><div class="skel" style="width:160px;aspect-ratio:2/3"></div><div style="flex:1"><div class="skel" style="height:40px;width:60%"></div><div class="skel" style="height:16px;width:40%;margin-top:1rem"></div><div class="skel" style="height:70px;margin-top:1rem"></div></div></div>';
   modal.hidden = false;
   document.body.style.overflow = 'hidden';
   let data, lists;
   try {
     [data, { lists }] = await Promise.all([api(`/api/movies/${id}`), api('/api/lists')]);
   } catch (err) {
-    body.innerHTML = `<div class="empty" style="margin:2rem">${esc(err.message)}</div>`;
+    body.innerHTML = `<div class="empty">${icon('film')}<strong>Couldn’t load this movie</strong>${esc(err.message)}</div>`;
     return;
   }
   const m = data.movie;
@@ -507,41 +597,41 @@ async function openMovie(id) {
 
   body.innerHTML = `
     <div class="detail-hero" style="${m.backdropUrl ? `background-image:url('${esc(m.backdropUrl)}')` : ''}">
-      ${poster(m)}
-      <div>
-        <h1>${esc(m.title)} <span class="muted" style="font-weight:500">${esc(m.year || '')}</span></h1>
-        ${m.tagline ? `<p class="muted"><em>${esc(m.tagline)}</em></p>` : ''}
-        <div class="detail-meta">
-          ${m.rating ? `<span class="chip">★ ${m.rating.toFixed(1)}</span>` : ''}
-          ${m.certification ? `<span class="chip">${esc(m.certification)}</span>` : ''}
-          ${m.runtime ? `<span class="chip">${fmtRuntime(m.runtime)}</span>` : ''}
-          ${m.genres.map((g) => `<span class="chip">${esc(g)}</span>`).join('')}
-          ${watched ? '<span class="chip badge-watched">✓ Watched</span>' : ''}
+      ${poster(m, { watched })}
+      <div class="spacer">
+        <h1>${esc(m.title)} <span>${esc(m.year || '')}</span></h1>
+        ${m.tagline ? `<p class="tagline">${esc(m.tagline)}</p>` : ''}
+        <div class="facts">
+          ${m.rating ? `<span>${STAR} ${m.rating.toFixed(1)}</span>` : ''}
+          ${m.certification ? `<span>${esc(m.certification)}</span>` : ''}
+          ${m.runtime ? `<span>${fmtRuntime(m.runtime)}</span>` : ''}
+          ${m.genres.length ? `<span>${m.genres.map(esc).join(', ')}</span>` : ''}
+          ${watched ? `<span style="color:var(--text)">${icon('check')} Watched</span>` : ''}
         </div>
-        <p>${esc(m.overview || '')}</p>
-        <div class="row" style="margin-top:0.5rem">
-          ${writable.length ? `<select id="addTo" style="width:auto"><option value="">Add to list…</option>${writable.map((l) => `<option value="${l.id}">${esc(l.name)}${l.kind === 'joint' ? ' (joint)' : ''}</option>`).join('')}</select>` : ''}
-          ${data.lists.length ? `<button class="btn secondary small" id="watchAll">${watched ? 'Mark unwatched' : '✓ Mark watched'}</button>` : ''}
+        <p class="overview">${esc(m.overview || '')}</p>
+        <div class="detail-actions">
+          ${writable.length ? `<select id="addTo" aria-label="Add to a list"><option value="">Add to a list…</option>${writable.map((l) => `<option value="${l.id}">${esc(l.name)}${l.kind === 'joint' ? ' (joint)' : ''}</option>`).join('')}</select>` : ''}
+          ${data.lists.length ? `<button class="btn ghost" id="watchAll">${watched ? 'Mark as not watched' : `${icon('check')}Mark as watched`}</button>` : ''}
+          ${data.lists.length ? `<p class="onlists">On ${data.lists.map((l) => `<a href="#/lists/${l.id}">${esc(l.name)}</a>`).join(', ')}</p>` : ''}
         </div>
-        ${data.lists.length ? `<p class="small muted" style="margin-top:0.75rem">On: ${data.lists.map((l) => `<a href="#/lists/${l.id}">${esc(l.name)}</a>`).join(', ')}</p>` : ''}
       </div>
     </div>
     <div class="detail-body">
       <h2>Trailer</h2>
       ${m.trailerKey
         ? `<div class="trailer"><iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(m.trailerKey)}?rel=0" title="${esc(m.title)} trailer" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`
-        : `<div class="empty" style="margin-bottom:1rem">No trailer on file. <a href="${ytSearch}" target="_blank" rel="noopener">Search YouTube ↗</a></div>`}
-      <h2>Credits</h2>
+        : `<div class="no-trailer"><span>No trailer on file for this movie.</span><a class="btn ghost small" href="${ytSearch}" target="_blank" rel="noopener">Find it on YouTube ${icon('external')}</a></div>`}
+      <h2>Cast &amp; crew</h2>
       <dl class="credits">
         ${m.director ? `<dt>Director</dt><dd>${esc(m.director)}</dd>` : ''}
-        ${m.writers.length ? `<dt>Writers</dt><dd>${m.writers.map(esc).join(', ')}</dd>` : ''}
+        ${m.writers.length ? `<dt>Writing</dt><dd>${m.writers.map(esc).join(', ')}</dd>` : ''}
       </dl>
       ${m.cast.length ? `<div class="cast">${m.cast.map((p) => `
         <div class="p">
           <div class="face">${p.photo ? `<img src="${esc(p.photo)}" alt="" loading="lazy" />` : esc(p.name.split(' ').map((w) => w[0]).slice(0, 2).join(''))}</div>
-          <div><strong>${esc(p.name)}</strong></div>
+          <div>${esc(p.name)}</div>
           <div class="c">${esc(p.character || '')}</div>
-        </div>`).join('')}</div>` : '<p class="muted">No cast information.</p>'}
+        </div>`).join('')}</div>` : '<p class="muted">No cast listed.</p>'}
     </div>`;
 
   $('#addTo')?.addEventListener('change', async (e) => {
@@ -556,7 +646,7 @@ async function openMovie(id) {
   $('#watchAll')?.addEventListener('click', async () => {
     try {
       await api(`/api/movies/${m.id}/watched`, { method: 'POST', body: { watched: !watched } });
-      toast(watched ? 'Marked unwatched' : 'Marked watched on every list');
+      toast(watched ? 'Back on your to-watch lists' : 'Marked as watched on every list');
       openMovie(m.id);
     } catch (err) { fail(err); }
   });
@@ -570,40 +660,43 @@ async function renderMatch() {
 }
 
 async function renderMatchSetup(prev) {
+  stopTimers();
   const [{ genres }, { lists }] = await Promise.all([api('/api/genres'), api('/api/lists')]);
   const chosen = new Set(prev?.genres || []);
   const listSel = new Set(prev?.listIds?.length ? prev.listIds : lists.map((l) => l.id));
   view.innerHTML = `
-    <h1>Match</h1>
-    <p class="muted">Both of you swipe through the movies on your lists. Swipe right on anything you’d watch tonight — when you both swipe right, it’s a match. Movies from the other person’s list come first, so you weigh in on each other’s ideas.</p>
-    <form id="setup" class="card filters" style="margin-top:1rem">
-      <div class="field"><label>In the mood for… (optional — leave empty for anything)</label>
-        <div class="chips">${genres.length ? genres.map((g) => `<span class="chip toggle ${chosen.has(g) ? 'on' : ''}" data-g="${esc(g)}">${esc(g)}</span>`).join('') : '<span class="muted small">Add movies to your lists first.</span>'}</div>
-      </div>
-      <div class="field" style="max-width:260px"><label>Max length</label>
-        <select name="maxRuntime">
-          <option value="">Any length</option>
-          <option value="100">Under 1h 40m</option>
-          <option value="120">Under 2h</option>
-          <option value="150">Under 2h 30m</option>
-        </select>
-      </div>
-      <div class="field"><label>Pull movies from</label>
-        <div class="chips">${lists.map((l) => `<span class="chip toggle ${listSel.has(l.id) ? 'on' : ''}" data-l="${l.id}">${esc(l.name)}</span>`).join('')}</div>
-      </div>
-      <button class="btn">Start match round</button>
-      <p class="small muted" style="margin:0.6rem 0 0">Starting a round replaces any round in progress for both of you.</p>
-    </form>`;
-  $$('[data-g]').forEach((c) => c.addEventListener('click', () => {
-    c.classList.toggle('on');
-    c.classList.contains('on') ? chosen.add(c.dataset.g) : chosen.delete(c.dataset.g);
-  }));
-  $$('[data-l]').forEach((c) => c.addEventListener('click', () => {
-    const id = Number(c.dataset.l);
-    c.classList.toggle('on');
-    c.classList.contains('on') ? listSel.add(id) : listSel.delete(id);
-  }));
-  if (prev?.maxRuntime) $('[name=maxRuntime]').value = String(prev.maxRuntime);
+    <div class="setup">
+      <h1 class="title-xl">Match</h1>
+      <p class="lede">You both swipe through the same movies from your lists. Swipe right on anything you’d watch tonight — when you both do, it’s a match.</p>
+      <form id="setup">
+        <div class="field"><label>In the mood for</label>
+          <div class="chips">${genres.length ? genres.map((g) => `<button type="button" class="chip-toggle ${chosen.has(g) ? 'on' : ''}" data-g="${esc(g)}" aria-pressed="${chosen.has(g)}">${esc(g)}</button>`).join('') : '<span class="muted small">Add movies to your lists first.</span>'}</div>
+          <p class="muted small" style="margin-top:0.5rem">Leave empty for anything.</p>
+        </div>
+        <div class="field"><label for="maxRuntime">Length</label>
+          <select id="maxRuntime">
+            <option value="">Any length</option>
+            <option value="100">Under 1h 40m</option>
+            <option value="120">Under 2h</option>
+            <option value="150">Under 2h 30m</option>
+          </select>
+        </div>
+        <div class="field"><label>From these lists</label>
+          <div class="chips">${lists.map((l) => `<button type="button" class="chip-toggle ${listSel.has(l.id) ? 'on' : ''}" data-l="${l.id}" aria-pressed="${listSel.has(l.id)}">${esc(l.name)}</button>`).join('')}</div>
+        </div>
+        <button class="btn">${icon('heart')}Start round</button>
+        <p class="muted small" style="margin-top:0.75rem">Starts a fresh round for both of you.</p>
+      </form>
+    </div>`;
+  const toggle = (c, set, val) => {
+    const on = !set.has(val);
+    on ? set.add(val) : set.delete(val);
+    c.classList.toggle('on', on);
+    c.setAttribute('aria-pressed', String(on));
+  };
+  $$('[data-g]').forEach((c) => c.addEventListener('click', () => toggle(c, chosen, c.dataset.g)));
+  $$('[data-l]').forEach((c) => c.addEventListener('click', () => toggle(c, listSel, Number(c.dataset.l))));
+  if (prev?.maxRuntime) $('#maxRuntime').value = String(prev.maxRuntime);
   $('#setup').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!listSel.size) return toast('Pick at least one list', true);
@@ -612,7 +705,7 @@ async function renderMatchSetup(prev) {
         method: 'POST',
         body: {
           genres: [...chosen],
-          maxRuntime: Number($('[name=maxRuntime]').value) || null,
+          maxRuntime: Number($('#maxRuntime').value) || null,
           listIds: listSel.size === lists.length ? [] : [...listSel],
         },
       });
@@ -629,109 +722,103 @@ async function renderRound(initial) {
   const pName = state.partner ? firstName(state.partner) : 'your partner';
 
   view.innerHTML = `
-    <div class="row" style="margin-bottom:1rem">
-      <h1 class="spacer" style="margin:0">Match</h1>
-      <button class="btn ghost small" id="newRound">New round</button>
-      <button class="btn ghost small" id="endRound">End round</button>
+    <div class="match-head">
+      <h1 class="title-l spacer">Match</h1>
+      <button class="btn quiet small" id="newRound">${icon('sliders')}New round</button>
+      <button class="btn quiet small" id="endRound">End</button>
     </div>
     <div class="match-layout">
-      <div>
-        <div class="progress" id="progress"></div>
+      <div class="match-main">
+        <div class="bars" id="progress"></div>
         <div class="deck" id="deck"></div>
         <div class="swipe-controls" id="controls">
-          <button class="round-btn mini" id="undoBtn" title="Undo (Backspace)">↺</button>
-          <button class="round-btn no" id="noBtn" title="Nope (←)">✕</button>
-          <button class="round-btn mini" id="infoBtn" title="Details (↑)">ⓘ</button>
-          <button class="round-btn yes" id="yesBtn" title="Yes! (→)">♥</button>
+          <button class="round-btn mini" id="undoBtn" aria-label="Undo last swipe">${icon('undo')}</button>
+          <button class="round-btn no" id="noBtn" aria-label="Not tonight">${icon('x')}</button>
+          <button class="round-btn yes" id="yesBtn" aria-label="Yes, I’d watch this">${icon('heart')}</button>
+          <button class="round-btn mini" id="infoBtn" aria-label="Details and trailer">${icon('info')}</button>
         </div>
+        <p class="keys">← no · → yes · ↑ details · Backspace undo</p>
       </div>
-      <aside class="card match-list" id="side"></aside>
+      <aside class="side" id="side"></aside>
     </div>`;
 
   const drawProgress = () => {
-    const pct = (n) => (state.poolSize ? Math.round((n / state.poolSize) * 100) : 0);
-    const f = state.round.filters;
-    const filt = [f.genres.length && f.genres.join(', '), f.maxRuntime && `under ${fmtRuntime(f.maxRuntime)}`].filter(Boolean).join(' · ');
+    const pct = (n) => (state.poolSize ? (n / state.poolSize) * 100 : 0);
     $('#progress').innerHTML = `
-      <div class="meter"><span class="small">You · ${state.mySwipes}/${state.poolSize}</span><div class="track"><div class="fill" style="width:${pct(state.mySwipes)}%"></div></div></div>
-      <div class="meter"><span class="small">${esc(pName)} · ${state.partnerSwipes}/${state.poolSize}</span><div class="track"><div class="fill" style="width:${pct(state.partnerSwipes)}%;background:var(--joint)"></div></div></div>
-      ${filt ? `<div class="small muted" style="flex-basis:100%;text-align:center">${esc(filt)}</div>` : ''}`;
+      <div class="meter"><span>You · ${state.mySwipes}/${state.poolSize}</span><div class="track"><div class="fill" style="width:${pct(state.mySwipes)}%"></div></div></div>
+      <div class="meter partner"><span>${esc(pName)} · ${state.partnerSwipes}/${state.poolSize}</span><div class="track"><div class="fill" style="width:${pct(state.partnerSwipes)}%"></div></div></div>`;
+    $('#undoBtn').disabled = !history.length;
   };
 
   const drawSide = () => {
     const row = (m, extra = '') => `
       <div class="mrow ${state.chosen?.id === m.id ? 'chosen' : ''}" data-movie="${m.id}">
-        ${poster(m)}
-        <div class="spacer"><strong>${esc(m.title)}</strong><div class="small muted">${[m.year, fmtRuntime(m.runtime), m.rating && `★ ${m.rating.toFixed(1)}`].filter(Boolean).join(' · ')}${extra}</div></div>
-        <button class="btn ${state.chosen?.id === m.id ? 'secondary' : 'ghost'} small" data-choose="${m.id}">${state.chosen?.id === m.id ? '✓ Tonight' : 'Pick'}</button>
+        ${poster(m, { mini: true })}
+        <div class="spacer"><div class="t">${esc(m.title)}</div><div class="s">${[m.year, fmtRuntime(m.runtime)].filter(Boolean).join(' · ')}${extra}</div></div>
+        <button class="btn ${state.chosen?.id === m.id ? '' : 'ghost'} small" data-choose="${m.id}" aria-pressed="${state.chosen?.id === m.id}">${state.chosen?.id === m.id ? `${icon('check')}Tonight` : 'Pick'}</button>
       </div>`;
     const bothDone = state.myDone && state.partnerDone;
-    let html = `<h2>💘 Matches (${state.matches.length})</h2>`;
-    if (state.chosen) html += `<p class="small" style="color:var(--good)">Tonight’s pick: <strong>${esc(state.chosen.title)}</strong> 🍿</p>`;
-    html += state.matches.length
-      ? state.matches.map((m) => row(m)).join('') + (state.matches.length > 1 ? `<button class="btn small" id="spin" style="width:100%;margin-top:0.6rem">🎲 Pick one for us</button>` : '')
-      : `<p class="muted small">${bothDone ? 'No matches this round.' : `No matches yet — keep swiping. Matches appear here the moment you and ${esc(pName)} both like a movie.`}</p>`;
+    const f = state.round.filters;
+    const filt = [f.genres.length && f.genres.join(', '), f.maxRuntime && `under ${fmtRuntime(f.maxRuntime)}`].filter(Boolean).join(' · ');
+    let html = `<h2>Matches <span class="count">${state.matches.length}</span></h2>`;
+    if (filt) html += `<p class="hint">${esc(filt)}</p>`;
+    html += `<div class="group">${state.matches.length
+      ? state.matches.map((m) => row(m)).join('') + (state.matches.length > 1 && !state.chosen ? `<button class="btn ghost block" id="spin" style="margin-top:0.75rem">${icon('dice')}Pick one for us</button>` : '')
+      : `<p class="hint">${bothDone ? 'No movie got two yeses this round.' : `When you and ${esc(pName)} both swipe right on a movie, it lands here.`}</p>`}</div>`;
     if (state.nearMisses.length && (bothDone || !state.matches.length)) {
-      html += `<h2 style="margin-top:1.2rem">🤏 Near misses</h2>
-        <p class="muted small">Only one of you said yes. ${bothDone && !state.matches.length ? 'Good compromise candidates:' : ''}</p>
-        ${state.nearMisses.slice(0, 6).map((m) => row(m, ` · liked by ${m.likedBy === 'me' ? 'you' : esc(pName)}`)).join('')}`;
-    }
-    if (bothDone && !state.matches.length && !state.nearMisses.length) {
-      html += `<p class="muted small">Tough crowd! Try a new round with different filters, or add more movies.</p>`;
+      html += `<div class="group"><h2>Near misses</h2>
+        <p class="hint">Only one of you said yes${bothDone && !state.matches.length ? ' — a good place to compromise' : ''}.</p>
+        <div style="margin-top:0.75rem">${state.nearMisses.slice(0, 6).map((m) => row(m, ` · <span class="${m.likedBy === 'me' ? '' : 'seat-partner'}">${m.likedBy === 'me' ? 'you' : esc(pName)} liked it</span>`)).join('')}</div></div>`;
     }
     $('#side').innerHTML = html;
     bindMovieClicks($('#side'));
     $$('[data-choose]', $('#side')).forEach((b) => b.addEventListener('click', () => choose(Number(b.dataset.choose))));
-    $('#spin')?.addEventListener('click', () => {
-      const pick = state.matches[Math.floor(Math.random() * state.matches.length)];
-      choose(pick.id);
-    });
+    $('#spin')?.addEventListener('click', () => choose(state.matches[Math.floor(Math.random() * state.matches.length)].id));
   };
 
   async function choose(movieId) {
     try {
       ({ state } = await api('/api/match/choose', { method: 'POST', body: { movieId: state.chosen?.id === movieId ? null : movieId } }));
       drawSide();
-      if (state.chosen) toast(`Tonight’s pick: ${state.chosen.title} 🍿`);
+      if (state.chosen) toast(`Tonight: ${state.chosen.title}`);
     } catch (err) { fail(err); }
   }
 
-  const sourceLabel = (c) => ({
-    partner: `<span class="chip partner">From ${esc(pName)}’s picks</span>`,
-    me: '<span class="chip mine">Your pick</span>',
-    both: '<span class="chip joint">You both picked this</span>',
-    joint: '<span class="chip joint">Joint list</span>',
+  const sourceTag = (c) => ({
+    partner: `<span class="tag partner">${icon('user')}${esc(pName)}’s pick</span>`,
+    me: `<span class="tag">${icon('user')}Your pick</span>`,
+    both: `<span class="tag joint">${icon('users')}You both picked this</span>`,
+    joint: `<span class="tag joint">${icon('users')}Joint list</span>`,
   })[c.source] || '';
 
-  const drawDeck = () => {
+  const drawDeck = (promote = false) => {
     const deck = $('#deck');
-    const controls = $('#controls');
-    if (!cards.length) {
-      controls.style.visibility = history.length ? 'visible' : 'hidden';
-      $$('.round-btn:not(#undoBtn)', controls).forEach((b) => (b.style.display = 'none'));
-      deck.innerHTML = `<div class="empty" style="height:100%;display:flex;flex-direction:column;justify-content:center;gap:0.5rem">
+    const live = !!cards.length;
+    ['noBtn', 'yesBtn', 'infoBtn'].forEach((id) => ($(`#${id}`).disabled = !live));
+    if (!live) {
+      deck.innerHTML = `<div class="deck-done">
         ${state.poolSize === 0
-          ? '<div style="font-size:2rem">🫙</div><strong>No movies fit this round.</strong><span>Add movies to your lists or loosen the filters.</span>'
-          : `<div style="font-size:2rem">✅</div><strong>You’ve swiped everything!</strong><span>${state.partnerDone ? (state.matches.length ? 'Check your matches →' : 'No mutual likes — see the near misses →') : `Waiting on ${esc(pName)} (${state.partnerSwipes}/${state.poolSize}). New matches will pop up here.`}</span>`}
+          ? `${icon('film')}<h2>Nothing to swipe</h2><p>No unwatched movies fit this round. Add some to your lists or loosen the filters.</p><button class="btn ghost" id="loosen">Change filters</button>`
+          : state.partnerDone
+            ? `${icon('check')}<h2>Round complete</h2><p>${state.matches.length ? `You have ${plural(state.matches.length, 'match')}. Pick one for tonight.` : 'No movie got two yeses. The near misses are your best compromise.'}</p>`
+            : `${icon('check')}<h2>You’re all done</h2><p>Waiting on ${esc(pName)} — ${state.partnerSwipes} of ${state.poolSize} swiped. New matches pop up here.</p>`}
       </div>`;
+      $('#loosen')?.addEventListener('click', () => renderMatchSetup(state.round.filters));
       return;
     }
-    controls.style.visibility = 'visible';
-    $$('.round-btn', controls).forEach((b) => (b.style.display = ''));
     const [top, next] = cards;
     const cardHtml = (c, cls) => `
-      <div class="swipe-card ${cls}" data-id="${c.id}">
+      <div class="swipe-card ${cls}" data-id="${c.id}" ${cls === 'behind' ? 'aria-hidden="true"' : ''}>
         ${poster(c)}
         <span class="stamp yes">YES</span><span class="stamp no">NOPE</span>
         <div class="info">
-          ${sourceLabel(c)}
-          <h2 style="margin-top:0.4rem">${esc(c.title)} <span style="font-weight:500;opacity:.75">${esc(c.year || '')}</span></h2>
-          <div class="small" style="color:#ccc">${[c.rating && `★ ${c.rating.toFixed(1)}`, fmtRuntime(c.runtime), c.genres.slice(0, 3).join(', ')].filter(Boolean).map(esc).join(' · ')}</div>
-          ${c.director ? `<div class="small" style="color:#ccc">Dir. ${esc(c.director)}${c.cast[0] ? ` · ${esc(c.cast.slice(0, 2).map((p) => p.name).join(', '))}` : ''}</div>` : ''}
+          ${sourceTag(c)}
+          <h2>${esc(c.title)} <span>${esc(c.year || '')}</span></h2>
+          <div class="facts">${[c.rating && `${STAR} ${c.rating.toFixed(1)}`, fmtRuntime(c.runtime), c.genres.slice(0, 2).map(esc).join(', '), c.director && `Dir. ${esc(c.director)}`].filter(Boolean).map((x) => `<span>${x}</span>`).join('')}</div>
           <p>${esc(c.overview || '')}</p>
         </div>
       </div>`;
-    deck.innerHTML = (next ? cardHtml(next, 'behind') : '') + cardHtml(top, '');
+    deck.innerHTML = (next ? cardHtml(next, 'behind') : '') + cardHtml(top, promote ? 'promote' : '');
     attachDrag($('.swipe-card:not(.behind)', deck), (liked) => swipe(liked));
   };
 
@@ -748,10 +835,11 @@ async function renderRound(initial) {
     const card = cards[0];
     const el = $('.swipe-card:not(.behind)');
     if (animate && el) {
-      el.style.transition = 'transform .3s ease, opacity .3s';
-      el.style.transform = `translateX(${liked ? 600 : -600}px) rotate(${liked ? 25 : -25}deg)`;
+      $(`.stamp.${liked ? 'yes' : 'no'}`, el).style.opacity = 1;
+      el.style.transition = 'transform .28s cubic-bezier(.4,0,.6,1), opacity .28s';
+      el.style.transform = `translateX(${liked ? 520 : -520}px) rotate(${liked ? 18 : -18}deg)`;
       el.style.opacity = '0';
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 220));
     }
     try {
       const r = await api('/api/match/swipe', { method: 'POST', body: { movieId: card.id, liked } });
@@ -766,7 +854,7 @@ async function renderRound(initial) {
       await loadDeck().catch(() => {});
     }
     busy = false;
-    drawProgress(); drawSide(); drawDeck();
+    drawProgress(); drawSide(); drawDeck(true);
   }
 
   async function undo() {
@@ -775,20 +863,26 @@ async function renderRound(initial) {
     try {
       ({ state } = await api('/api/match/undo', { method: 'POST', body: { movieId: last.id } }));
       cards = [last, ...cards.filter((c) => c.id !== last.id)];
-      drawProgress(); drawSide(); drawDeck();
+      drawProgress(); drawSide(); drawDeck(true);
     } catch (err) { fail(err); }
   }
 
   function celebrate(m) {
+    $('.its-a-match')?.remove();
     const el = document.createElement('div');
     el.className = 'its-a-match';
-    el.innerHTML = `<h1>It’s a match!</h1>${poster(m)}<p>You and ${esc(pName)} both want to watch <strong>${esc(m.title)}</strong>.</p>
-      <div class="row"><button class="btn" data-pick>Watch this tonight</button><button class="btn ghost" data-keep>Keep swiping</button></div>`;
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-label', 'It’s a match');
+    el.innerHTML = `${poster(m)}<span class="label eyebrow">You both said yes</span><h1>It’s a match</h1>
+      <p>You and ${esc(pName)} both want to watch <b>${esc(m.title)}</b>.</p>
+      <div class="row" style="justify-content:center"><button class="btn" data-pick>${icon('play')}Watch it tonight</button><button class="btn ghost" data-keep>Keep swiping</button></div>`;
     document.body.appendChild(el);
     const close = () => el.remove();
+    app.cleanups.push(close);
     el.addEventListener('click', (e) => e.target === el && close());
     $('[data-keep]', el).addEventListener('click', close);
     $('[data-pick]', el).addEventListener('click', () => { close(); choose(m.id); });
+    $('[data-pick]', el).focus();
   }
 
   $('#yesBtn').addEventListener('click', () => swipe(true, true));
@@ -796,18 +890,18 @@ async function renderRound(initial) {
   $('#undoBtn').addEventListener('click', undo);
   $('#infoBtn').addEventListener('click', () => cards[0] && openMovie(cards[0].id));
   $('#endRound').addEventListener('click', async () => {
-    if (!confirm('End this round for both of you?')) return;
+    if (!confirm(`End this round for you and ${pName}?`)) return;
     stopTimers();
     await api('/api/match/end', { method: 'POST' }).catch(fail);
     renderMatchSetup();
   });
-  $('#newRound').addEventListener('click', () => { stopTimers(); renderMatchSetup(state.round.filters); });
+  $('#newRound').addEventListener('click', () => renderMatchSetup(state.round.filters));
 
   const onKey = (e) => {
-    if (!$('#modal').hidden || !$('#deck') || e.target.matches('input, select, textarea')) return;
+    if (!$('#modal').hidden || $('.its-a-match') || e.target.matches('input, select, textarea')) return;
     if (e.key === 'ArrowRight') swipe(true, true);
     else if (e.key === 'ArrowLeft') swipe(false, true);
-    else if (e.key === 'ArrowUp') cards[0] && openMovie(cards[0].id);
+    else if (e.key === 'ArrowUp') { e.preventDefault(); cards[0] && openMovie(cards[0].id); }
     else if (e.key === 'Backspace') undo();
   };
   document.addEventListener('keydown', onKey);
@@ -850,7 +944,7 @@ function attachDrag(el, onSwipe) {
   el.addEventListener('pointermove', (e) => {
     if (!dragging) return;
     dx = e.clientX - startX; dy = e.clientY - startY;
-    el.style.transform = `translate(${dx}px, ${dy * 0.3}px) rotate(${dx / 18}deg)`;
+    el.style.transform = `translate(${dx}px, ${dy * 0.25}px) rotate(${dx / 20}deg)`;
     yes.style.opacity = Math.max(0, Math.min(1, dx / 90));
     no.style.opacity = Math.max(0, Math.min(1, -dx / 90));
   });
@@ -858,14 +952,14 @@ function attachDrag(el, onSwipe) {
     if (!dragging) return;
     dragging = false;
     el.style.cursor = '';
-    if (Math.abs(dx) > 110) {
+    if (Math.abs(dx) > 100) {
       const liked = dx > 0;
-      el.style.transition = 'transform .25s ease, opacity .25s';
-      el.style.transform = `translate(${liked ? 700 : -700}px, ${dy}px) rotate(${liked ? 30 : -30}deg)`;
+      el.style.transition = 'transform .26s cubic-bezier(.3,.6,.4,1), opacity .26s';
+      el.style.transform = `translate(${liked ? 640 : -640}px, ${dy * 0.6}px) rotate(${liked ? 24 : -24}deg)`;
       el.style.opacity = '0';
-      setTimeout(() => onSwipe(liked), 180);
+      setTimeout(() => onSwipe(liked), 170);
     } else {
-      el.style.transition = 'transform .25s ease';
+      el.style.transition = 'transform .35s cubic-bezier(.2,1.4,.4,1)';
       el.style.transform = '';
       yes.style.opacity = no.style.opacity = 0;
       if (Math.abs(dx) < 5 && Math.abs(dy) < 5) openMovie(Number(el.dataset.id));
@@ -876,5 +970,5 @@ function attachDrag(el, onSwipe) {
 }
 
 boot().catch((err) => {
-  view.innerHTML = `<div class="empty">Couldn’t reach the server: ${esc(err.message)}</div>`;
+  view.innerHTML = `<div class="empty">${icon('film')}<strong>Couldn’t reach MovieMatch</strong>${esc(err.message)}</div>`;
 });

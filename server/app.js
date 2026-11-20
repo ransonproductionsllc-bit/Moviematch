@@ -115,6 +115,9 @@ export function createApp({ db, provider, secureCookies = false }) {
       ON CONFLICT(round_id, user_id, movie_id) DO UPDATE SET liked = excluded.liked, created_at = datetime('now')`),
     deleteSwipe: db.prepare('DELETE FROM swipes WHERE round_id = ? AND user_id = ? AND movie_id = ?'),
     poolItems: db.prepare(`SELECT i.movie_id, i.list_id, i.watched FROM list_items i`),
+    listPreview: db.prepare(`
+      SELECT m.id, m.title, m.year, m.poster_url FROM list_items i JOIN movies m ON m.id = i.movie_id
+      WHERE i.list_id = ? ORDER BY i.watched, i.added_at DESC, i.id DESC LIMIT 3`),
   };
 
   // ---------- helpers ----------
@@ -189,6 +192,7 @@ export function createApp({ db, provider, secureCookies = false }) {
       itemCount: l.item_count ?? undefined,
       watchedCount: l.watched_count ?? undefined,
       createdAt: l.created_at,
+      preview: q.listPreview.all(l.id).map((m) => ({ id: m.id, title: m.title, year: m.year, posterUrl: m.poster_url })),
     };
   }
 
