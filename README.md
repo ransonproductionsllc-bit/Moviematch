@@ -46,6 +46,10 @@ Open the site and create the first account. Your partner then opens the same add
 2. Go to **Settings → API** and request an API key (choose "Developer", personal use).
 3. Put the **API Key** in `.env` as `TMDB_API_KEY=...`. You can use the **API Read Access Token** instead, as `TMDB_READ_TOKEN=...`.
 
+**Keep the key private.** It only ever lives in `.env`, which git ignores, so it is never committed. Only the server talks to TMDB, so the key is never sent to anyone's browser. Don't paste it into code, issues or chat. If it leaks, generate a new one on the same TMDB settings page.
+
+If your server reaches the internet through an HTTPS proxy, start it with `NODE_USE_ENV_PROXY=1 npm start` so Node uses the proxy.
+
 **Without a key, the app runs in demo mode** with about 20 built-in movies. This is handy for trying it out. You can add a key later. Movies you added in demo mode stay on your lists.
 
 ## Configuration (`.env`)

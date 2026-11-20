@@ -146,6 +146,14 @@ test('round filters and watched movies narrow the pool', async () => {
   assert.equal(r.body.state.poolSize, 7);
 });
 
+test('TMDB failures never leak the API key', async () => {
+  const secret = 'not-a-real-key-123';
+  const offline = createProvider({ apiKey: secret, fetchImpl: async (url) => { throw new Error(`fetch failed ${url}`); } });
+  await assert.rejects(offline.search('x'), (err) => err.status === 502 && !err.message.includes(secret));
+  const denied = createProvider({ apiKey: secret, fetchImpl: async () => new Response('{}', { status: 401 }) });
+  await assert.rejects(denied.details(1), (err) => err.status === 502 && !err.message.includes(secret));
+});
+
 test('tmdb helpers pick the official trailer and normalize credits', () => {
   assert.equal(
     pickTrailer([

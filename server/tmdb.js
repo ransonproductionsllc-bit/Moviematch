@@ -18,7 +18,15 @@ export function createProvider({ apiKey, readToken, demo, fetchImpl = fetch } = 
     const headers = { accept: 'application/json' };
     if (readToken) headers.authorization = `Bearer ${readToken}`;
     else url.searchParams.set('api_key', apiKey);
-    const res = await fetchImpl(url, { headers });
+    let res;
+    try {
+      res = await fetchImpl(url, { headers });
+    } catch {
+      // Never surface the underlying error: the request URL carries the API key.
+      const err = new Error('Could not reach TMDB — check your internet connection');
+      err.status = 502;
+      throw err;
+    }
     if (!res.ok) {
       const err = new Error(`TMDB request failed (${res.status})`);
       err.status = res.status === 404 ? 404 : 502;
