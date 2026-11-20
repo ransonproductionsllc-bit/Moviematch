@@ -123,4 +123,4 @@ npm test
 
 The staggered poster reveal and the inline form-error pattern are adapted from [Toggle Supply](https://www.toggle.supply/) (MIT License, Copyright (c) 2025 Toggle Supply).
 
-This product uses the TMDB API but is not endorsed or certified by TMDB. Titles are set in [Instrument Serif](https://github.com/Instrument/instrument-serif), bundled under the SIL Open Font License (`public/fonts/InstrumentSerif-OFL.txt`).
+This product uses the TMDB API but is not endorsed or certified by TMDB. The logo is set in [Gloock](https://github.com/duartp/gloock) and titles in [Big Shoulders Display](https://github.com/xotypeco/big_shoulders), both bundled under the SIL Open Font License 1.1 (`public/fonts/*-OFL.txt`).
