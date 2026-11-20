@@ -32,7 +32,61 @@ const ICONS = {
   external: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
   sliders: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+  more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+  sort: '<path d="M7 4v16M3.5 16.5 7 20l3.5-3.5M17 20V4M13.5 7.5 17 4l3.5 3.5"/>',
+  logout: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/>',
 };
+
+const initials = (u) => (u?.displayName || u?.username || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+const avatar = (u, cls = '') => `<span class="avatar ${cls}" aria-hidden="true">${esc(initials(u))}</span>`;
+
+/**
+ * Small pop-up menu anchored to a button. items: [{ label, icon, onClick, danger, checked, disabled, heading }]
+ * Used for the poster "⋯" menu, "Add to list" and the account button.
+ */
+function openMenu(anchor, items) {
+  closeMenu();
+  const el = document.createElement('div');
+  el.className = 'menu';
+  el.setAttribute('role', 'menu');
+  el.innerHTML = items.map((it, i) => it.heading
+    ? `<div class="menu-head">${esc(it.label)}</div>`
+    : `<button type="button" role="menuitem" data-i="${i}" class="${it.danger ? 'danger' : ''}" ${it.disabled ? 'disabled' : ''}>
+        ${it.icon ? icon(it.icon) : ''}<span>${esc(it.label)}</span>${it.checked ? `<span class="tick">${icon('check')}</span>` : ''}</button>`).join('');
+  document.body.appendChild(el);
+  const r = anchor.getBoundingClientRect();
+  const left = Math.min(Math.max(8, r.right - el.offsetWidth), innerWidth - el.offsetWidth - 8);
+  let top = r.bottom + 6;
+  if (top + el.offsetHeight > innerHeight - 8) top = Math.max(8, r.top - el.offsetHeight - 6);
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-i]');
+    if (!b) return;
+    closeMenu();
+    items[Number(b.dataset.i)].onClick?.();
+  });
+  anchor.setAttribute('aria-expanded', 'true');
+  openMenu.state = { el, anchor };
+  setTimeout(() => document.addEventListener('pointerdown', onOutside, true));
+  el.querySelector('button:not([disabled])')?.focus();
+}
+function onOutside(e) {
+  const s = openMenu.state;
+  if (s && !s.el.contains(e.target) && !s.anchor.contains(e.target)) closeMenu();
+}
+function closeMenu() {
+  const s = openMenu.state;
+  if (!s) return false;
+  s.el.remove();
+  s.anchor.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('pointerdown', onOutside, true);
+  openMenu.state = null;
+  return true;
+}
+window.addEventListener('scroll', closeMenu, { passive: true });
+window.addEventListener('resize', closeMenu);
+const onHome = () => /^#?\/?$/.test(location.hash || '#/');
 const STAR = '<svg class="i fill" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg>';
 const icon = (name, label) =>
   `<svg class="i" viewBox="0 0 24 24" ${label ? `role="img" aria-label="${esc(label)}"` : 'aria-hidden="true"'}>${ICONS[name]}</svg>`;
@@ -117,6 +171,7 @@ const routes = [
 async function route() {
   stopTimers();
   closeModal();
+  closeMenu();
   if (!app.user) return renderAuth();
   const hash = location.hash || '#/';
   for (const [re, fn, nav] of routes) {
@@ -162,14 +217,19 @@ function showChrome() {
   $('#topbar').hidden = false;
   $('#tabbar').hidden = false;
   $('#whoName').textContent = app.user.displayName;
+  $('#meAvatar').innerHTML = avatar(app.user, 'me');
 }
 
-$('#logoutBtn').addEventListener('click', async () => {
+$('#meBtn').addEventListener('click', (e) => openMenu(e.currentTarget, [
+  { heading: true, label: `Signed in as ${app.user.displayName}` },
+  { label: 'Sign out', icon: 'logout', onClick: signOut },
+]));
+async function signOut() {
   await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
   app.user = null;
   location.hash = '#/';
   renderAuth();
-});
+}
 
 // ---------- auth ----------
 async function renderAuth() {
@@ -226,13 +286,21 @@ function movieCard(m, { sub = '', by = '' } = {}) {
     ${sub ? `<div class="s">${sub}</div>` : ''}${by}</div>`;
 }
 
+/** "For Alex · with Sam" — whose home this is. */
+function forWhom(d) {
+  return `<div class="for-whom">
+    <span class="pair">${avatar(d.me, 'me')}${d.partner ? avatar(d.partner, 'partner') : ''}</span>
+    <span>For <b>${esc(firstName(d.me))}</b>${d.partner ? ` <span class="muted">· with ${esc(firstName(d.partner))}</span>` : ''}</span>
+  </div>`;
+}
+
 /** Big backdrop at the top of Home: tonight's pick, or something you'd both enjoy. */
 function marquee(d) {
   const pName = d.partner ? firstName(d.partner) : null;
   const r = d.round;
   const m = d.tonight?.movie || d.feature?.movie;
   if (!m) {
-    return `<section class="marquee empty-marquee"><div class="copy">
+    return `<section class="marquee empty-marquee">${forWhom(d)}<div class="copy">
       <span class="eyebrow">${icon('film')}Welcome</span>
       <h1>Start your movie list</h1>
       <p class="facts">Add a few titles you both want to see. The best of them shows up here.</p>
@@ -263,6 +331,7 @@ function marquee(d) {
     actions = `<button class="btn" data-tonight="${m.id}">${icon('play')}Watch tonight</button>${matchBtn}`;
   }
   return `<section class="marquee">${art}
+    ${forWhom(d)}
     <div class="copy">
       <span class="eyebrow">${eyebrow}</span>
       <h1 data-movie="${m.id}">${esc(m.title)}</h1>
@@ -419,19 +488,17 @@ async function renderList(id) {
       <input id="addInput" placeholder="Add a movie — type a title" autocomplete="off" aria-label="Add a movie by title" role="combobox" aria-expanded="false" aria-controls="suggest" />
       <div class="suggest" id="suggest" role="listbox" hidden></div>
     </div>` : ''}
-    <div class="toolbar">
-      <div class="seg" role="tablist" aria-label="Filter">
-        <button data-f="towatch" class="on">To watch</button>
-        <button data-f="watched">Watched</button>
-        <button data-f="all">All</button>
-      </div>
-      <span class="spacer"></span>
-      <select id="sortSel" aria-label="Sort">
+    <div class="chipbar" role="toolbar" aria-label="Filter and sort">
+      <button type="button" class="chip-toggle on" data-f="towatch" aria-pressed="true">To watch</button>
+      <button type="button" class="chip-toggle" data-f="watched" aria-pressed="false">Watched</button>
+      <button type="button" class="chip-toggle" data-f="all" aria-pressed="false">All</button>
+      <span class="chip-sep" aria-hidden="true"></span>
+      <label class="chip-select">${icon('sort')}<select id="sortSel" aria-label="Sort">
         <option value="added">Recently added</option>
         <option value="rating">Highest rated</option>
         <option value="title">A–Z</option>
         <option value="runtime">Shortest first</option>
-      </select>
+      </select></label>
     </div>
     <div id="grid"></div>`;
 
@@ -451,48 +518,66 @@ async function renderList(id) {
       runtime: (a, b) => (a.movie.runtime || 999) - (b.movie.runtime || 999),
     }[sort];
     items = [...items].sort(cmp);
-    const tools = (i) => list.canEdit ? `<div class="tools">
-        <button class="icon-btn ${i.watched ? 'on' : ''}" data-watch="${i.id}" aria-pressed="${i.watched}" aria-label="${i.watched ? 'Watched — mark as not watched' : 'Mark as watched'}" title="${i.watched ? 'Watched' : 'Mark as watched'}">${icon('check')}</button>
-        <button class="icon-btn" data-remove="${i.id}" aria-label="Remove ${esc(i.movie.title)}" title="Remove from list">${icon('x')}</button>
-      </div>` : '';
+    const badge = (i) => (i.watched ? `<span class="badge">${icon('check')}Watched</span>` : '');
+    const more = (i) => list.canEdit
+      ? `<button type="button" class="more" data-more="${i.id}" aria-haspopup="menu" aria-expanded="false" aria-label="Options for ${esc(i.movie.title)}">${icon('more')}</button>`
+      : '';
     $('#grid').innerHTML = items.length
       ? `<div class="movie-grid">${items.map((i) => `
           <div class="mcard" data-movie="${i.movie.id}">
-            ${poster(i.movie, { score: true, watched: i.watched, extra: tools(i) })}
-            <div class="t">${esc(i.movie.title)} <span>${esc(i.movie.year || '')}</span></div>
+            ${poster(i.movie, { score: true, watched: i.watched, extra: badge(i) })}
+            <div class="t-row"><div class="t">${esc(i.movie.title)} <span>${esc(i.movie.year || '')}</span></div>${more(i)}</div>
             <div class="s">${[i.movie.director, fmtRuntime(i.movie.runtime)].filter(Boolean).map(esc).join(' · ')}</div>
             ${list.kind === 'joint' && i.addedByName ? `<div class="s by ${i.addedBy === app.user.id ? 'me' : ''}">Added by ${i.addedBy === app.user.id ? 'you' : esc(i.addedByName)}</div>` : ''}
           </div>`).join('')}</div>`
       : filter === 'watched'
-        ? `<div class="empty">${icon('check')}<strong>Nothing watched yet</strong>Tap the check on a poster after movie night.</div>`
+        ? `<div class="empty">${icon('check')}<strong>Nothing watched yet</strong>After movie night, tap ⋯ under a poster and mark it watched.</div>`
         : data.items.length
           ? `<div class="empty">${icon('check')}<strong>All caught up</strong>Everything on this list has been watched.</div>`
           : `<div class="empty">${icon('film')}<strong>This list is empty</strong>${list.canEdit ? 'Type a title above. Poster, cast, crew and trailer fill in on their own.' : ''}</div>`;
     bindMovieClicks($('#grid'));
-    $$('[data-watch]').forEach((b) => b.addEventListener('click', async () => {
-      const item = data.items.find((i) => i.id === Number(b.dataset.watch));
-      try {
-        await api(`/api/lists/${list.id}/items/${item.id}`, { method: 'PATCH', body: { watched: !item.watched } });
-        item.watched = !item.watched;
-        toast(item.watched ? `Marked ${item.movie.title} as watched` : `${item.movie.title} is back on the to-watch list`);
-        drawGrid();
-      } catch (err) { fail(err); }
-    }));
-    $$('[data-remove]').forEach((b) => b.addEventListener('click', async () => {
-      const item = data.items.find((i) => i.id === Number(b.dataset.remove));
-      if (!confirm(`Remove “${item.movie.title}” from ${list.name}?`)) return;
-      try {
-        await api(`/api/lists/${list.id}/items/${item.id}`, { method: 'DELETE' });
-        data.items = data.items.filter((i) => i !== item);
-        toast(`Removed ${item.movie.title}`);
-        drawGrid();
-      } catch (err) { fail(err); }
+    $$('[data-more]').forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = data.items.find((i) => i.id === Number(b.dataset.more));
+      openMenu(b, [
+        { label: item.watched ? 'Mark as not watched' : 'Mark as watched', icon: 'check', onClick: () => toggleWatched(item) },
+        ...(item.watched ? [] : [{ label: 'Watch tonight', icon: 'play', onClick: () => watchTonight(item) }]),
+        { label: 'Details & trailer', icon: 'info', onClick: () => openMovie(item.movie.id) },
+        { label: 'Remove from list', icon: 'trash', danger: true, onClick: () => removeItem(item) },
+      ]);
     }));
   };
 
+  async function toggleWatched(item) {
+    try {
+      await api(`/api/lists/${list.id}/items/${item.id}`, { method: 'PATCH', body: { watched: !item.watched } });
+      item.watched = !item.watched;
+      toast(item.watched ? `Marked ${item.movie.title} as watched` : `${item.movie.title} is back on the to-watch list`);
+      drawGrid();
+    } catch (err) { fail(err); }
+  }
+  async function watchTonight(item) {
+    try {
+      await api('/api/tonight', { method: 'POST', body: { movieId: item.movie.id } });
+      toast(`Tonight: ${item.movie.title}`);
+    } catch (err) { fail(err); }
+  }
+  async function removeItem(item) {
+    if (!confirm(`Remove “${item.movie.title}” from ${list.name}?`)) return;
+    try {
+      await api(`/api/lists/${list.id}/items/${item.id}`, { method: 'DELETE' });
+      data.items = data.items.filter((i) => i !== item);
+      toast(`Removed ${item.movie.title}`);
+      drawGrid();
+    } catch (err) { fail(err); }
+  }
+
   $$('[data-f]').forEach((b) => b.addEventListener('click', () => {
     filter = b.dataset.f;
-    $$('[data-f]').forEach((x) => x.classList.toggle('on', x === b));
+    $$('[data-f]').forEach((x) => {
+      x.classList.toggle('on', x === b);
+      x.setAttribute('aria-pressed', String(x === b));
+    });
     drawGrid();
   }));
   $('#sortSel').addEventListener('change', (e) => { sort = e.target.value; drawGrid(); });
@@ -592,7 +677,10 @@ function closeModal() {
   document.body.style.overflow = '';
 }
 $$('[data-close]').forEach((el) => el.addEventListener('click', closeModal));
-document.addEventListener('keydown', (e) => e.key === 'Escape' && closeModal());
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!closeMenu()) closeModal();
+});
 
 async function openMovie(id) {
   const modal = $('#modal');
@@ -609,7 +697,7 @@ async function openMovie(id) {
   }
   const m = data.movie;
   const onLists = new Set(data.lists.map((l) => l.id));
-  const writable = lists.filter((l) => l.canEdit && !onLists.has(l.id));
+  const editable = lists.filter((l) => l.canEdit);
   const watched = data.lists.some((l) => l.watched);
   const ytSearch = `https://www.youtube.com/results?search_query=${encodeURIComponent(`${m.title} ${m.year || ''} official trailer`)}`;
 
@@ -628,7 +716,10 @@ async function openMovie(id) {
         </div>
         <p class="overview">${esc(m.overview || '')}</p>
         <div class="detail-actions">
-          ${writable.length ? `<select id="addTo" aria-label="Add to a list"><option value="">Add to a list…</option>${writable.map((l) => `<option value="${l.id}">${esc(l.name)}${l.kind === 'joint' ? ' (joint)' : ''}</option>`).join('')}</select>` : ''}
+          ${watched ? '' : data.tonight
+            ? `<button class="btn" id="tonightBtn" aria-pressed="true">${icon('check')}Tonight’s pick</button>`
+            : `<button class="btn" id="tonightBtn" aria-pressed="false">${icon('play')}Watch tonight</button>`}
+          ${editable.length ? `<button class="btn ghost" id="addToBtn" aria-haspopup="menu" aria-expanded="false">${icon('plus')}Add to list</button>` : ''}
           ${data.lists.length ? `<button class="btn ghost" id="watchAll">${watched ? 'Mark as not watched' : `${icon('check')}Mark as watched`}</button>` : ''}
           ${data.lists.length ? `<p class="onlists">On ${data.lists.map((l) => `<a href="#/lists/${l.id}">${esc(l.name)}</a>`).join(', ')}</p>` : ''}
         </div>
@@ -652,20 +743,41 @@ async function openMovie(id) {
         </div>`).join('')}</div>` : '<p class="muted">No cast listed.</p>'}
     </div>`;
 
-  $('#addTo')?.addEventListener('change', async (e) => {
-    const listId = e.target.value;
-    if (!listId) return;
+  // Anything changed here should show on Home straight away.
+  const refresh = () => { openMovie(m.id); if (onHome()) renderDashboard().catch(() => {}); };
+
+  $('#addToBtn')?.addEventListener('click', (e) => {
+    const kind = (l) => (l.kind === 'joint' ? 'Joint' : 'Yours');
+    openMenu(e.currentTarget, [
+      { heading: true, label: 'Add to a list' },
+      ...editable.map((l) => ({
+        label: `${l.name} · ${kind(l)}`,
+        icon: l.kind === 'joint' ? 'users' : 'user',
+        checked: onLists.has(l.id),
+        disabled: onLists.has(l.id),
+        onClick: async () => {
+          try {
+            await api(`/api/lists/${l.id}/items`, { method: 'POST', body: { tmdbId: m.id } });
+            toast(`Added to ${l.name}`);
+            refresh();
+          } catch (err) { fail(err); }
+        },
+      })),
+      { label: 'New list…', icon: 'plus', onClick: () => { closeModal(); location.hash = '#/lists'; } },
+    ]);
+  });
+  $('#tonightBtn')?.addEventListener('click', async () => {
     try {
-      await api(`/api/lists/${listId}/items`, { method: 'POST', body: { tmdbId: m.id } });
-      toast(`Added to ${e.target.selectedOptions[0].textContent}`);
-      openMovie(m.id);
+      await api('/api/tonight', { method: 'POST', body: { movieId: data.tonight ? null : m.id } });
+      toast(data.tonight ? 'Tonight’s pick cleared' : `Tonight: ${m.title}`);
+      refresh();
     } catch (err) { fail(err); }
   });
   $('#watchAll')?.addEventListener('click', async () => {
     try {
       await api(`/api/movies/${m.id}/watched`, { method: 'POST', body: { watched: !watched } });
       toast(watched ? 'Back on your to-watch lists' : 'Marked as watched on every list');
-      openMovie(m.id);
+      refresh();
     } catch (err) { fail(err); }
   });
 }
@@ -751,8 +863,8 @@ async function renderRound(initial) {
         <div class="deck" id="deck"></div>
         <div class="swipe-controls" id="controls">
           <button class="round-btn mini" id="undoBtn" aria-label="Undo last swipe">${icon('undo')}</button>
-          <button class="round-btn no" id="noBtn" aria-label="Not tonight">${icon('x')}</button>
-          <button class="round-btn yes" id="yesBtn" aria-label="Yes, I’d watch this">${icon('heart')}</button>
+          <span class="ctl"><button class="round-btn no" id="noBtn" aria-label="Not tonight">${icon('x')}</button><small aria-hidden="true">Not tonight</small></span>
+          <span class="ctl"><button class="round-btn yes" id="yesBtn" aria-label="Yes, I’d watch this">${icon('heart')}</button><small aria-hidden="true">I’d watch it</small></span>
           <button class="round-btn mini" id="infoBtn" aria-label="Details and trailer">${icon('info')}</button>
         </div>
         <p class="keys">← no · → yes · ↑ details · Backspace undo</p>
@@ -838,7 +950,26 @@ async function renderRound(initial) {
       </div>`;
     deck.innerHTML = (next ? cardHtml(next, 'behind') : '') + cardHtml(top, promote ? 'promote' : '');
     attachDrag($('.swipe-card:not(.behind)', deck), (liked) => swipe(liked));
+    if (!hintSeen()) showHint(deck);
   };
+
+  // One-time "how to swipe" hint, remembered per person on this device.
+  const hintKey = `mm_swipe_hint_${app.user.id}`;
+  const hintSeen = () => { try { return localStorage.getItem(hintKey) === '1'; } catch { return false; } };
+  const dismissHint = () => {
+    try { localStorage.setItem(hintKey, '1'); } catch { /* storage unavailable: show again next time */ }
+    $('.swipe-hint')?.remove();
+  };
+  function showHint(deck) {
+    const h = document.createElement('div');
+    h.className = 'swipe-hint';
+    h.setAttribute('role', 'status');
+    h.innerHTML = `<p><b>Swipe right</b> if you’d watch it tonight, <b>left</b> to pass. When ${esc(pName)} likes it too, it’s a match.</p>
+      <button type="button" class="btn small">Got it</button>`;
+    deck.appendChild(h);
+    $('button', h).addEventListener('click', dismissHint);
+    $('.swipe-card:not(.behind)', deck)?.classList.add('nudge');
+  }
 
   async function loadDeck() {
     const r = await api('/api/match/deck?limit=20');
@@ -849,6 +980,7 @@ async function renderRound(initial) {
   let busy = false;
   async function swipe(liked, animate = false) {
     if (busy || !cards.length) return;
+    if (!hintSeen()) dismissHint();
     busy = true;
     const card = cards[0];
     const el = $('.swipe-card:not(.behind)');

@@ -408,7 +408,7 @@ export function createApp({ db, provider, secureCookies = false }) {
     const lists = q.movieMemberships.all(row.id).map((l) => ({
       id: l.id, name: l.name, kind: l.kind, ownerId: l.owner_id, itemId: l.item_id, watched: !!l.watched,
     }));
-    res.json({ movie: movieDto(row), lists });
+    res.json({ movie: movieDto(row), lists, tonight: getTonight()?.movie.id === row.id });
   }));
 
   /** Genres present across everything on any list (for match-round filters). */
