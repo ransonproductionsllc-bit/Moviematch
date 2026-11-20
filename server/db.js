@@ -92,6 +92,11 @@ export function openDb(dbPath) {
     CREATE INDEX IF NOT EXISTS idx_items_movie ON list_items(movie_id);
     CREATE INDEX IF NOT EXISTS idx_swipes_movie ON swipes(round_id, movie_id);
   `);
+  // Migrations for databases created by earlier versions
+  const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!userCols.includes('must_change_password')) {
+    db.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
+  }
   return db;
 }
 

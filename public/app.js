@@ -35,6 +35,7 @@ const ICONS = {
   more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
   sort: '<path d="M7 4v16M3.5 16.5 7 20l3.5-3.5M17 20V4M13.5 7.5 17 4l3.5 3.5"/>',
   logout: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.7-8.7M16 7l2.5 2.5M14 9l2 2"/>',
 };
 
 const initials = (u) => (u?.displayName || u?.username || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
@@ -53,7 +54,7 @@ function openMenu(anchor, items) {
     ? `<div class="menu-head">${esc(it.label)}</div>`
     : `<button type="button" role="menuitem" data-i="${i}" class="${it.danger ? 'danger' : ''}" ${it.disabled ? 'disabled' : ''}>
         ${it.icon ? icon(it.icon) : ''}<span>${esc(it.label)}</span>${it.checked ? `<span class="tick">${icon('check')}</span>` : ''}</button>`).join('');
-  document.body.appendChild(el);
+  ([...document.querySelectorAll('dialog[open]')].pop() || document.body).appendChild(el);
   const r = anchor.getBoundingClientRect();
   const left = Math.min(Math.max(8, r.right - el.offsetWidth), innerWidth - el.offsetWidth - 8);
   let top = r.bottom + 6;
@@ -104,20 +105,399 @@ async function api(path, { method = 'GET', body } = {}) {
     renderAuth();
     throw new Error(data.error || 'Please sign in');
   }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (res.status === 403 && /new password/i.test(data.error || '') && app.user) {
+    app.user.mustChangePassword = true;
+    renderSetPassword();
+  }
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    err.field = data.field;
+    throw err;
+  }
   return data;
 }
 
 let toastTimer;
-function toast(msg, isErr = false) {
+/** toast(message) · toast(message, true) for an error · toast(message, { action: { label, onClick } }) */
+function toast(msg, opts = false) {
+  const o = typeof opts === 'object' && opts ? opts : { err: !!opts };
   const t = $('#toast');
-  t.textContent = msg;
-  t.className = 'toast' + (isErr ? ' err' : '');
-  t.hidden = false;
+  t.className = 'toast' + (o.err ? ' err' : '');
+  t.innerHTML = `<span>${esc(msg)}</span>${o.action ? `<button type="button" class="toast-action">${esc(o.action.label)}</button>` : ''}`;
+  if (o.action) $('.toast-action', t).addEventListener('click', () => { hideToast(); o.action.onClick(); });
+  // A popover sits in the top layer, so the message stays visible above an open dialog.
+  if (t.showPopover) {
+    try { t.hidePopover(); } catch { /* not open */ }
+    t.showPopover();
+  } else t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), 3000);
+  toastTimer = setTimeout(hideToast, o.duration || (o.action ? 5000 : 3000));
+}
+function hideToast() {
+  const t = $('#toast');
+  if (t.hidePopover) { try { t.hidePopover(); } catch { /* not open */ } } else t.hidden = true;
 }
 const fail = (err) => toast(err.message || String(err), true);
+
+// ---------- inline form validation (pattern from Toggle Supply's form validation) ----------
+const RULES = {
+  displayName: (v) => (!v.trim() ? 'Tell us what to call you' : v.trim().length > 40 ? 'Keep your name under 40 characters' : ''),
+  username: (v) => (/^[a-zA-Z0-9_.-]{2,32}$/.test(v.trim()) ? '' : 'Use 2–32 letters, numbers, dots, dashes or underscores'),
+  loginUsername: (v) => (v.trim() ? '' : 'Enter your username'),
+  loginPassword: (v) => (v ? '' : 'Enter your password'),
+  password: (v) => (v.length >= 6 ? '' : 'Use at least 6 characters'),
+  currentPassword: (v) => (v ? '' : 'Enter your current password'),
+  confirmPassword: (v, form) => (v === form.newPassword.value ? '' : 'The two passwords don’t match'),
+  listName: (v) => (!v.trim() ? 'Give the list a name' : v.trim().length > 60 ? 'Keep it under 60 characters' : ''),
+};
+
+function setFieldError(input, msg) {
+  const field = input.closest('.field');
+  let el = $('.field-error', field);
+  if (!el) {
+    el = document.createElement('p');
+    el.className = 'field-error';
+    el.id = `${input.id}-error`;
+    field.appendChild(el);
+  }
+  el.textContent = msg || '';
+  field.classList.toggle('invalid', !!msg);
+  input.setAttribute('aria-invalid', String(!!msg));
+  if (msg) input.setAttribute('aria-describedby', el.id);
+  else input.removeAttribute('aria-describedby');
+}
+
+/** Checks a field when you leave it and re-checks while you fix it. Returns validateAll(), which focuses the first problem. */
+function wireValidation(form, rules) {
+  const check = (input) => {
+    const msg = rules[input.name] ? rules[input.name](input.value, form) : '';
+    setFieldError(input, msg);
+    return !msg;
+  };
+  for (const input of $$('input', form)) {
+    if (!rules[input.name]) continue;
+    input.addEventListener('blur', () => {
+      if (input.value || input.dataset.touched) check(input);
+      input.dataset.touched = '1';
+    });
+    input.addEventListener('input', () => { if (input.closest('.field').classList.contains('invalid')) check(input); });
+  }
+  return () => {
+    let first = null;
+    for (const input of $$('input', form)) if (rules[input.name] && !check(input) && !first) first = input;
+    first?.focus();
+    return !first;
+  };
+}
+
+/** Show a server error beside the field it names, otherwise in the general error line. */
+function showServerError(form, err, generalEl) {
+  const input = err.field && form.querySelector(`[name="${err.field}"]`);
+  if (input) {
+    setFieldError(input, err.message);
+    input.focus();
+    if (generalEl) generalEl.textContent = '';
+  } else if (generalEl) generalEl.textContent = err.message;
+  else toast(err.message, true);
+}
+
+// ---------- in-app dialogs (native <dialog>: focus stays inside, Escape closes, focus returns) ----------
+/**
+ * actions: [{ label (HTML), kind: ''|'ghost'|'danger-solid', value, submit, onSubmit(dialog) }]
+ * onSubmit returns the value to close with, or undefined to stay open (e.g. a validation error).
+ */
+function openDialog({ title, body = '', actions = [], className = '', onOpen }) {
+  return new Promise((resolve) => {
+    const opener = document.activeElement;
+    const d = document.createElement('dialog');
+    d.className = `dlg ${className}`;
+    d.setAttribute('aria-labelledby', 'dlg-title');
+    d.innerHTML = `<form method="dialog" class="dlg-card" novalidate>
+      <h2 id="dlg-title">${esc(title)}</h2>
+      <div class="dlg-body">${body}</div>
+      <div class="dlg-actions">${actions.map((a, i) => `<button type="${a.submit ? 'submit' : 'button'}" class="btn ${a.kind ?? 'ghost'}" data-a="${i}">${a.label}</button>`).join('')}</div>
+    </form>`;
+    document.body.appendChild(d);
+    let result;
+    const close = (value) => { result = value; d.close(); };
+    d.addEventListener('close', () => {
+      d.remove();
+      if (opener?.isConnected) opener.focus();
+      resolve(result);
+    });
+    d.addEventListener('click', (e) => { if (e.target === d) close(undefined); });
+    $$('[data-a]', d).forEach((b) => {
+      const a = actions[Number(b.dataset.a)];
+      if (!a.submit) b.addEventListener('click', () => close(a.value));
+    });
+    $('form', d).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const a = actions.find((x) => x.submit);
+      if (!a) return;
+      const btn = $(`[data-a="${actions.indexOf(a)}"]`, d);
+      btn.disabled = true;
+      const v = a.onSubmit ? await a.onSubmit(d) : a.value;
+      btn.disabled = false;
+      if (v !== undefined) close(v);
+    });
+    d.showModal();
+    onOpen?.(d, close);
+    ($('[autofocus]', d) || $('input:not([type=hidden])', d))?.focus();
+  });
+}
+
+const confirmDialog = ({ title, message, confirmLabel, danger = false }) =>
+  openDialog({
+    title,
+    body: `<p>${esc(message)}</p>`,
+    actions: [
+      { label: 'Cancel', value: false },
+      { label: esc(confirmLabel), kind: danger ? 'danger-solid' : '', value: true, submit: true },
+    ],
+  }).then((v) => v === true);
+
+function promptDialog({ title, label, value = '', confirmLabel = 'Save', rule }) {
+  return openDialog({
+    title,
+    body: `<div class="field"><label for="dlg-in">${esc(label)}</label><input id="dlg-in" name="value" value="${esc(value)}" autocomplete="off" /></div>`,
+    actions: [
+      { label: 'Cancel' },
+      {
+        label: esc(confirmLabel), kind: '', submit: true,
+        onSubmit: (d) => {
+          const input = $('#dlg-in', d);
+          const msg = rule ? rule(input.value) : '';
+          setFieldError(input, msg);
+          return msg ? undefined : input.value.trim();
+        },
+      },
+    ],
+    onOpen: (d) => $('#dlg-in', d).select(),
+  });
+}
+
+// ---------- remove with undo ----------
+const pendingRemovals = new Map();
+/** Remove after a short delay so "Undo" can cancel it. run(keepalive) performs the request. */
+function scheduleRemoval(key, run) {
+  const timer = setTimeout(() => { pendingRemovals.delete(key); run(false); }, 5200);
+  pendingRemovals.set(key, { timer, run });
+}
+function cancelRemoval(key) {
+  const p = pendingRemovals.get(key);
+  if (!p) return false;
+  clearTimeout(p.timer);
+  pendingRemovals.delete(key);
+  return true;
+}
+function flushRemovals() {
+  for (const [key, p] of pendingRemovals) {
+    clearTimeout(p.timer);
+    pendingRemovals.delete(key);
+    p.run(true);
+  }
+}
+addEventListener('pagehide', flushRemovals);
+
+// ---------- live title search that adds to a list (list page + "Add a movie" sheet) ----------
+function attachAdder({ input, box, getListId, haveIds = () => new Set(), onAdded }) {
+  let results = [], hi = 0, seq = 0;
+  const show = (html) => {
+    box.hidden = !html;
+    input.setAttribute('aria-expanded', String(!!html));
+    if (html) box.innerHTML = html;
+    else input.removeAttribute('aria-activedescendant');
+  };
+  const draw = () => {
+    if (!results.length) return show('');
+    const have = haveIds();
+    show(results.map((r, i) => `
+      <button type="button" role="option" tabindex="-1" id="${box.id}-opt-${i}" data-i="${i}" class="${i === hi ? 'hi' : ''}" aria-selected="${i === hi}">
+        <span class="thumb">${poster(r, { mini: true })}</span>
+        <span class="spacer"><strong>${esc(r.title)}</strong> <span class="muted">${esc(r.year || '')}</span><span class="ov">${have.has(r.id) ? 'Already on this list' : esc(r.overview || '')}</span></span>
+        ${have.has(r.id) ? icon('check') : icon('plus')}
+      </button>`).join(''));
+    input.setAttribute('aria-activedescendant', `${box.id}-opt-${hi}`);
+    $$('button', box).forEach((b) => b.addEventListener('mousedown', (e) => { e.preventDefault(); add(results[Number(b.dataset.i)]); }));
+  };
+  const search = debounce(async () => {
+    const qv = input.value.trim();
+    const mine = ++seq;
+    if (qv.length < 2) { results = []; return draw(); }
+    show('<div class="hint">Searching…</div>');
+    try {
+      const { results: r } = await api(`/api/movies/search?q=${encodeURIComponent(qv)}`);
+      if (mine !== seq) return;
+      results = r; hi = 0;
+      if (r.length) draw();
+      else show(`<div class="hint">No movies match “${esc(qv)}”. Check the spelling, or try fewer words.</div>`);
+    } catch (err) { fail(err); }
+  }, 220);
+  async function add(pick) {
+    const title = input.value.trim();
+    if (!pick && !title) return;
+    if (pick && haveIds().has(pick.id)) return toast(`${pick.title} is already on this list`);
+    input.disabled = true;
+    show('<div class="hint">Adding and pulling in cast, crew and trailer…</div>');
+    try {
+      const { item } = await api(`/api/lists/${getListId()}/items`, { method: 'POST', body: pick ? { tmdbId: pick.id } : { title } });
+      input.value = ''; results = []; show('');
+      await onAdded(item);
+    } catch (err) { fail(err); draw(); }
+    input.disabled = false;
+    input.focus();
+  }
+  input.addEventListener('input', search);
+  input.addEventListener('blur', () => setTimeout(() => show(''), 150));
+  input.addEventListener('focus', () => results.length && draw());
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' && results.length) { hi = (hi + 1) % results.length; draw(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp' && results.length) { hi = (hi - 1 + results.length) % results.length; draw(); e.preventDefault(); }
+    else if (e.key === 'Escape' && !box.hidden) { e.preventDefault(); show(''); }
+    else if (e.key === 'Enter') { e.preventDefault(); add(results[hi] || null); }
+  });
+}
+
+/** "Add a movie" from anywhere: header button, tab bar, or the / key. */
+async function openAddSheet() {
+  if (document.querySelector('dialog[open]')) return;
+  let lists;
+  try { ({ lists } = await api('/api/lists')); } catch (err) { return fail(err); }
+  const editable = lists.filter((l) => l.canEdit);
+  if (!editable.length) return toast('Create a list first', true);
+  const key = `mm_add_list_${app.user.id}`;
+  let last = null;
+  try { last = Number(localStorage.getItem(key)); } catch { /* storage unavailable */ }
+  const def = editable.find((l) => l.id === last) || editable.find((l) => l.kind === 'joint') || editable[0];
+  let added = 0;
+  await openDialog({
+    title: 'Add a movie',
+    className: 'sheet',
+    body: `
+      <div class="field"><label for="addList">Add to</label>
+        <select id="addList">${editable.map((l) => `<option value="${l.id}" ${l.id === def.id ? 'selected' : ''}>${esc(l.name)}${l.kind === 'joint' ? ' · Joint' : ''}</option>`).join('')}</select></div>
+      <div class="adder">${icon('search')}
+        <input id="sheetInput" placeholder="Type a title" autocomplete="off" aria-label="Movie title" role="combobox" aria-expanded="false" aria-controls="sheetSuggest" aria-autocomplete="list" />
+        <div class="suggest" id="sheetSuggest" role="listbox" aria-label="Matching movies" hidden></div>
+      </div>
+      <p class="sheet-status" role="status"></p>`,
+    actions: [{ label: 'Done', value: 'done' }],
+    onOpen: async (d) => {
+      const sel = $('#addList', d);
+      let have = new Set();
+      const loadHave = async () => {
+        try { have = new Set((await api(`/api/lists/${sel.value}`)).items.map((i) => i.movie.id)); } catch { have = new Set(); }
+      };
+      sel.addEventListener('change', () => {
+        try { localStorage.setItem(key, sel.value); } catch { /* storage unavailable */ }
+        loadHave();
+      });
+      attachAdder({
+        input: $('#sheetInput', d),
+        box: $('#sheetSuggest', d),
+        getListId: () => sel.value,
+        haveIds: () => have,
+        onAdded: (item) => {
+          have.add(item.movie.id);
+          added++;
+          const listName = editable.find((l) => String(l.id) === sel.value)?.name || 'your list';
+          $('.sheet-status', d).textContent = `Added ${item.movie.title}${item.movie.year ? ` (${item.movie.year})` : ''} to ${listName}. Add another, or tap Done.`;
+        },
+      });
+      await loadHave();
+    },
+  });
+  if (added) route();
+}
+
+// ---------- account: password change and partner reset ----------
+function changePasswordDialog() {
+  return openDialog({
+    title: 'Change password',
+    body: `
+      <div class="field"><label for="cp-cur">Current password</label><input id="cp-cur" name="currentPassword" type="password" autocomplete="current-password" /></div>
+      <div class="field"><label for="cp-new">New password</label><input id="cp-new" name="newPassword" type="password" autocomplete="new-password" /></div>`,
+    actions: [
+      { label: 'Cancel' },
+      {
+        label: 'Save password', kind: '', submit: true,
+        onSubmit: async (d) => {
+          const form = $('form', d);
+          if (!d.validate()) return undefined;
+          try {
+            await api('/api/auth/password', { method: 'POST', body: { currentPassword: form.currentPassword.value, newPassword: form.newPassword.value } });
+            toast('Password changed');
+            return true;
+          } catch (err) { showServerError(form, err, null); return undefined; }
+        },
+      },
+    ],
+    onOpen: (d) => { d.validate = wireValidation($('form', d), { currentPassword: RULES.currentPassword, newPassword: RULES.password }); },
+  });
+}
+
+async function resetPartnerDialog(partner) {
+  const name = firstName(partner);
+  const ok = await confirmDialog({
+    title: `Reset ${name}’s password?`,
+    message: `${name} will be signed out on every device and get a one-time temporary password from you. They’ll choose a new password the next time they sign in.`,
+    confirmLabel: 'Reset password',
+    danger: true,
+  });
+  if (!ok) return;
+  let temporaryPassword;
+  try { ({ temporaryPassword } = await api('/api/partner/reset-password', { method: 'POST' })); } catch (err) { return fail(err); }
+  await openDialog({
+    title: `${name}’s temporary password`,
+    body: `<p>Give this to ${esc(name)}. It works once and is only shown now.</p>
+      <p class="temp-pass"><code>${esc(temporaryPassword)}</code><button type="button" class="btn ghost small" data-copy>Copy</button></p>`,
+    actions: [{ label: 'Done', kind: '', submit: true, value: true }],
+    onOpen: (d) => $('[data-copy]', d).addEventListener('click', async (e) => {
+      try { await navigator.clipboard.writeText(temporaryPassword); e.currentTarget.textContent = 'Copied'; }
+      catch { toast('Couldn’t copy. Select the password instead.', true); }
+    }),
+  });
+}
+
+/** Shown after signing in with a temporary password: nothing else works until a new one is chosen. */
+function renderSetPassword() {
+  stopTimers();
+  $('#topbar').hidden = true;
+  $('#tabbar').hidden = true;
+  view.innerHTML = `
+    <div class="auth">
+      <div class="brand">Movie<em>Match</em></div>
+      <h1 class="title-m">Choose a new password</h1>
+      <p class="lede">You signed in with a temporary password. Pick a new one to keep going.</p>
+      <form id="pwForm" novalidate>
+        <div class="field"><label for="f-new">New password</label><input id="f-new" name="newPassword" type="password" autocomplete="new-password" required /></div>
+        <div class="field"><label for="f-confirm">Type it again</label><input id="f-confirm" name="confirmPassword" type="password" autocomplete="new-password" required /></div>
+        <p class="error" id="pwErr" role="alert"></p>
+        <button class="btn block" id="pwSave">Save new password</button>
+        <button type="button" class="btn quiet block" id="pwSignOut">Sign out</button>
+      </form>
+    </div>`;
+  const form = $('#pwForm');
+  const validate = wireValidation(form, { newPassword: RULES.password, confirmPassword: RULES.confirmPassword });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!validate()) return;
+    $('#pwSave').disabled = true;
+    try {
+      const { user } = await api('/api/auth/password', { method: 'POST', body: { newPassword: form.newPassword.value } });
+      app.user = user;
+      toast('Password saved');
+      showChrome();
+      route();
+    } catch (err) {
+      showServerError(form, err, $('#pwErr'));
+      $('#pwSave').disabled = false;
+    }
+  });
+  $('#pwSignOut').addEventListener('click', signOut);
+  $('#f-new').focus();
+}
 
 function debounce(fn, ms) {
   let t;
@@ -169,10 +549,12 @@ const routes = [
 ];
 
 async function route() {
+  flushRemovals();
   stopTimers();
   closeModal();
   closeMenu();
   if (!app.user) return renderAuth();
+  if (app.user.mustChangePassword) return renderSetPassword();
   const hash = location.hash || '#/';
   for (const [re, fn, nav] of routes) {
     const m = hash.match(re);
@@ -202,6 +584,9 @@ window.addEventListener('hashchange', route);
 async function boot() {
   $$('[data-icon]').forEach((el) => (el.outerHTML = icon(el.dataset.icon)));
   $('.modal-close').innerHTML = icon('x');
+  if (!$('#toast').showPopover) { $('#toast').removeAttribute('popover'); $('#toast').hidden = true; }
+  $('#addBtn').addEventListener('click', openAddSheet);
+  $('#addTab').addEventListener('click', openAddSheet);
   app.status = await api('/api/status');
   app.user = app.status.user;
   if (app.status.mode === 'demo') {
@@ -218,12 +603,18 @@ function showChrome() {
   $('#tabbar').hidden = false;
   $('#whoName').textContent = app.user.displayName;
   $('#meAvatar').innerHTML = avatar(app.user, 'me');
+  api('/api/status').then((st) => { app.status = st; }).catch(() => {});
 }
 
-$('#meBtn').addEventListener('click', (e) => openMenu(e.currentTarget, [
-  { heading: true, label: `Signed in as ${app.user.displayName}` },
-  { label: 'Sign out', icon: 'logout', onClick: signOut },
-]));
+$('#meBtn').addEventListener('click', (e) => {
+  const partner = app.status?.partner;
+  openMenu(e.currentTarget, [
+    { heading: true, label: `Signed in as ${app.user.displayName}` },
+    { label: 'Change password', icon: 'key', onClick: changePasswordDialog },
+    ...(partner ? [{ label: `Reset ${firstName(partner)}’s password`, icon: 'undo', onClick: () => resetPartnerDialog(partner) }] : []),
+    { label: 'Sign out', icon: 'logout', onClick: signOut },
+  ]);
+});
 async function signOut() {
   await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
   app.user = null;
@@ -251,26 +642,42 @@ async function renderAuth() {
           <button type="button" role="tab" data-mode="login" class="${mode === 'login' ? 'on' : ''}">Sign in</button>
           <button type="button" role="tab" data-mode="register" class="${mode === 'register' ? 'on' : ''}">Create account</button>
         </div>` : ''}
-        <form id="authForm">
+        <form id="authForm" novalidate>
           ${mode === 'register' ? '<div class="field"><label for="f-name">Your name</label><input id="f-name" name="displayName" autocomplete="given-name" placeholder="Sam" required /></div>' : ''}
-          <div class="field"><label for="f-user">Username</label><input id="f-user" name="username" autocomplete="username" autocapitalize="off" required /></div>
-          <div class="field"><label for="f-pass">Password</label><input id="f-pass" name="password" type="password" autocomplete="${mode === 'register' ? 'new-password' : 'current-password'}" required minlength="6" /></div>
+          <div class="field"><label for="f-user">Username</label><input id="f-user" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required /></div>
+          <div class="field"><label for="f-pass">Password</label><input id="f-pass" name="password" type="password" autocomplete="${mode === 'register' ? 'new-password' : 'current-password'}" required /></div>
           <p class="error" id="authErr" role="alert"></p>
           <button class="btn block">${mode === 'register' ? 'Create my account' : 'Sign in'}</button>
         </form>
+        ${mode === 'login' ? `<button type="button" class="btn quiet block forgot" id="forgotBtn" aria-expanded="false" aria-controls="forgotHelp">Forgot your password?</button>
+        <div class="help-panel" id="forgotHelp" hidden>
+          <p><strong>Ask your partner to reset it.</strong> On their device: tap their initials at the top right, then <em>Reset your partner’s password</em>. They’ll give you a one-time password, and you’ll pick a new one after signing in.</p>
+          <p>If neither of you can sign in, whoever runs the server can run <code>npm run reset-password -- your-username</code>.</p>
+        </div>` : ''}
       </div>`;
     $$('[data-mode]').forEach((b) => b.addEventListener('click', () => { mode = b.dataset.mode; draw(); }));
-    $('#authForm').addEventListener('submit', async (e) => {
+    const form = $('#authForm');
+    const validate = wireValidation(form, mode === 'register'
+      ? { displayName: RULES.displayName, username: RULES.username, password: RULES.password }
+      : { username: RULES.loginUsername, password: RULES.loginPassword });
+    $('#forgotBtn')?.addEventListener('click', (e) => {
+      const panel = $('#forgotHelp');
+      panel.hidden = !panel.hidden;
+      e.currentTarget.setAttribute('aria-expanded', String(!panel.hidden));
+    });
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const btn = $('button.btn', e.target);
+      $('#authErr').textContent = '';
+      if (!validate()) return;
+      const btn = $('button.btn', form);
       btn.disabled = true;
       try {
-        const { user } = await api(`/api/auth/${mode}`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+        const { user } = await api(`/api/auth/${mode}`, { method: 'POST', body: Object.fromEntries(new FormData(form)) });
         app.user = user;
-        showChrome();
+        if (!user.mustChangePassword) showChrome();
         route();
       } catch (err) {
-        $('#authErr').textContent = err.message;
+        showServerError(form, err, $('#authErr'));
         btn.disabled = false;
       }
     });
@@ -280,10 +687,22 @@ async function renderAuth() {
 
 // ---------- dashboard ----------
 // ---------- home: marquee + shelves ----------
-function movieCard(m, { sub = '', by = '' } = {}) {
-  return `<div class="mcard" data-movie="${m.id}">${poster(m, { score: true })}
+/** Small initials showing whose pick a film is (you, your partner, or both). */
+function seatBadges(m, d) {
+  if (!m.seats?.length) return '';
+  return `<span class="seats" aria-hidden="true">${m.seats.map((s) => avatar(s === 'me' ? d.me : d.partner, s)).join('')}</span>`;
+}
+const whose = (m, d) => {
+  const names = (m.seats || []).map((s) => (s === 'me' ? 'you' : firstName(d.partner)));
+  return names.length ? `, picked by ${names.join(' and ')}` : '';
+};
+
+function movieCard(m, { sub = '', d = null, seats = false, i = 0 } = {}) {
+  const label = `${m.title}${m.year ? ` (${m.year})` : ''}${seats && d ? whose(m, d) : ''}. Details and trailer`;
+  return `<div class="mcard" style="--i:${Math.min(i, 8)}">
+    <button type="button" class="card-open" data-movie="${m.id}" aria-label="${esc(label)}">${poster(m, { score: true, extra: seats && d ? seatBadges(m, d) : '' })}</button>
     <div class="t">${esc(m.title)}</div>
-    ${sub ? `<div class="s">${sub}</div>` : ''}${by}</div>`;
+    ${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
 }
 
 /** "For Alex · with Sam" — whose home this is. */
@@ -304,7 +723,7 @@ function marquee(d) {
       <span class="eyebrow">${icon('film')}Welcome</span>
       <h1>Start your movie list</h1>
       <p class="facts">Add a few titles you both want to see. The best of them shows up here.</p>
-      <div class="actions"><a class="btn" href="#/lists">${icon('plus')}Add movies</a></div>
+      <div class="actions"><button type="button" class="btn" data-add>${icon('plus')}Add a movie</button></div>
     </div></section>`;
   }
   const hue = (m.id * 47) % 360;
@@ -324,8 +743,8 @@ function marquee(d) {
     const by = d.tonight.setBy && d.tonight.setBy.id !== d.me.id ? ` · picked by ${esc(firstName(d.tonight.setBy))}` : '';
     eyebrow = `${icon('play')}Tonight’s pick${by}`;
     actions = `<button class="btn" data-trailer="${m.id}">${icon('play')}Play trailer</button>
-      <button class="btn ghost" data-watched="${m.id}">${icon('check')}We watched it</button>
-      <button class="btn quiet small" data-clear>Change pick</button>`;
+      <button class="btn ghost" data-watched="${m.id}">${icon('check')}Mark as watched</button>
+      <button class="btn quiet small" data-clear>Clear tonight’s pick</button>`;
   } else {
     eyebrow = `${icon(d.feature.reason === 'both' ? 'users' : 'film')}${esc(d.feature.label)}`;
     actions = `<button class="btn" data-tonight="${m.id}">${icon('play')}Watch tonight</button>${matchBtn}`;
@@ -334,7 +753,7 @@ function marquee(d) {
     ${forWhom(d)}
     <div class="copy">
       <span class="eyebrow">${eyebrow}</span>
-      <h1 data-movie="${m.id}">${esc(m.title)}</h1>
+      <h1><button type="button" class="title-open" data-movie="${m.id}" aria-label="${esc(m.title)}. Details and trailer">${esc(m.title)}</button></h1>
       <div class="facts">${facts}</div>
       ${m.overview ? `<p class="overview">${esc(m.overview)}</p>` : ''}
       <div class="actions">${actions}</div>
@@ -345,8 +764,10 @@ function marquee(d) {
 function shelf(s, d) {
   const isList = s.key.startsWith('list-');
   const more = isList ? `<a class="btn quiet small" href="#/lists/${s.listId}">See all ${icon('right')}</a>` : '';
+  // Seat badges where it isn't obvious from the row title whose pick a film is.
+  const seats = isList || s.key === 'overlap' || s.key === 'matches';
   const body = s.movies.length
-    ? `<div class="strip">${s.movies.map((m) => movieCard(m, { sub: [m.year, fmtRuntime(m.runtime)].filter(Boolean).join(' · ') })).join('')}</div>`
+    ? `<div class="strip reveal">${s.movies.map((m, i) => movieCard(m, { d, seats, i, sub: [m.year, fmtRuntime(m.runtime)].filter(Boolean).join(' · ') })).join('')}</div>`
     : `<a class="empty shelf-empty" href="#/lists/${s.listId}">${icon('plus')}<strong>Nothing here yet</strong>Add the movies you both want to see.</a>`;
   const sub = s.subtitle ? `<span class="muted small ${s.partner ? 'seat-partner' : ''}">${esc(s.subtitle)}</span>` : '';
   return `<section class="section shelf">
@@ -386,7 +807,8 @@ async function renderDashboard() {
     } catch (err) { fail(err); }
   };
   $('[data-tonight]')?.addEventListener('click', (e) =>
-    setTonight(Number(e.currentTarget.dataset.tonight), `Tonight: ${d.feature.movie.title}`));
+    setTonight(Number(e.currentTarget.dataset.tonight), `Tonight’s pick: ${d.feature.movie.title}`));
+  $('[data-add]')?.addEventListener('click', openAddSheet);
   $('[data-clear]')?.addEventListener('click', () => setTonight(null));
   $('[data-trailer]')?.addEventListener('click', (e) => openMovie(Number(e.currentTarget.dataset.trailer)));
   $('[data-watched]')?.addEventListener('click', async (e) => {
@@ -414,14 +836,12 @@ function listRow(l) {
 }
 
 function bindMovieClicks(root) {
-  $$('[data-movie]', root).forEach((el) => {
-    el.tabIndex = 0;
-    const open = (e) => {
-      if (e.target.closest('button')) return;
-      openMovie(Number(el.dataset.movie));
-    };
-    el.addEventListener('click', open);
-    el.addEventListener('keydown', (e) => e.key === 'Enter' && open(e));
+  // Each film opens through a real <button data-movie>, so keyboards and screen readers get it for free.
+  $$('[data-movie]', root).forEach((el) => el.addEventListener('click', () => openMovie(Number(el.dataset.movie))));
+  // Mouse convenience: the title text under a poster opens it too.
+  $$('.mcard', root).forEach((card) => {
+    const open = $('.card-open', card);
+    if (open) card.addEventListener('click', (e) => { if (!e.target.closest('button, a')) open.click(); });
   });
 }
 
@@ -508,6 +928,7 @@ async function renderList(id) {
     $$('[data-f]').forEach((b) => (b.textContent = labels[b.dataset.f]));
   };
 
+  let firstDraw = true;
   const drawGrid = () => {
     counts();
     let items = data.items.filter((i) => (filter === 'all' ? true : filter === 'watched' ? i.watched : !i.watched));
@@ -522,10 +943,11 @@ async function renderList(id) {
     const more = (i) => list.canEdit
       ? `<button type="button" class="more" data-more="${i.id}" aria-haspopup="menu" aria-expanded="false" aria-label="Options for ${esc(i.movie.title)}">${icon('more')}</button>`
       : '';
+    const label = (i) => `${i.movie.title}${i.movie.year ? ` (${i.movie.year})` : ''}${i.watched ? ', watched' : ''}. Details and trailer`;
     $('#grid').innerHTML = items.length
-      ? `<div class="movie-grid">${items.map((i) => `
-          <div class="mcard" data-movie="${i.movie.id}">
-            ${poster(i.movie, { score: true, watched: i.watched, extra: badge(i) })}
+      ? `<div class="movie-grid${firstDraw ? ' reveal' : ''}">${items.map((i, n) => `
+          <div class="mcard" style="--i:${Math.min(n, 8)}">
+            <button type="button" class="card-open" data-movie="${i.movie.id}" aria-label="${esc(label(i))}">${poster(i.movie, { score: true, watched: i.watched, extra: badge(i) })}</button>
             <div class="t-row"><div class="t">${esc(i.movie.title)} <span>${esc(i.movie.year || '')}</span></div>${more(i)}</div>
             <div class="s">${[i.movie.director, fmtRuntime(i.movie.runtime)].filter(Boolean).map(esc).join(' · ')}</div>
             ${list.kind === 'joint' && i.addedByName ? `<div class="s by ${i.addedBy === app.user.id ? 'me' : ''}">Added by ${i.addedBy === app.user.id ? 'you' : esc(i.addedByName)}</div>` : ''}
@@ -535,6 +957,7 @@ async function renderList(id) {
         : data.items.length
           ? `<div class="empty">${icon('check')}<strong>All caught up</strong>Everything on this list has been watched.</div>`
           : `<div class="empty">${icon('film')}<strong>This list is empty</strong>${list.canEdit ? 'Type a title above. Poster, cast, crew and trailer fill in on their own.' : ''}</div>`;
+    firstDraw = false;
     bindMovieClicks($('#grid'));
     $$('[data-more]').forEach((b) => b.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -559,17 +982,30 @@ async function renderList(id) {
   async function watchTonight(item) {
     try {
       await api('/api/tonight', { method: 'POST', body: { movieId: item.movie.id } });
-      toast(`Tonight: ${item.movie.title}`);
+      toast(`Tonight’s pick: ${item.movie.title}`);
     } catch (err) { fail(err); }
   }
-  async function removeItem(item) {
-    if (!confirm(`Remove “${item.movie.title}” from ${list.name}?`)) return;
-    try {
-      await api(`/api/lists/${list.id}/items/${item.id}`, { method: 'DELETE' });
-      data.items = data.items.filter((i) => i !== item);
-      toast(`Removed ${item.movie.title}`);
-      drawGrid();
-    } catch (err) { fail(err); }
+  // Remove straight away with an Undo, instead of asking first.
+  function removeItem(item) {
+    const index = data.items.indexOf(item);
+    const key = `item-${item.id}`;
+    data.items = data.items.filter((i) => i !== item);
+    drawGrid();
+    scheduleRemoval(key, (keepalive) => {
+      fetch(`/api/lists/${list.id}/items/${item.id}`, { method: 'DELETE', credentials: 'same-origin', keepalive })
+        .then((r) => { if (!r.ok) throw new Error(); })
+        .catch(() => toast(`Couldn’t remove ${item.movie.title}. Try again.`, true));
+    });
+    toast(`Removed ${item.movie.title}`, {
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          if (!cancelRemoval(key)) return;
+          data.items.splice(Math.min(index, data.items.length), 0, item);
+          if ($('#grid')) drawGrid();
+        },
+      },
+    });
   }
 
   $$('[data-f]').forEach((b) => b.addEventListener('click', () => {
@@ -586,8 +1022,8 @@ async function renderList(id) {
   if (!list.canEdit) return;
 
   $('#renameBtn').addEventListener('click', async () => {
-    const name = prompt('Rename list', list.name);
-    if (!name?.trim()) return;
+    const name = await promptDialog({ title: 'Rename list', label: 'List name', value: list.name, confirmLabel: 'Rename', rule: RULES.listName });
+    if (!name || name === list.name) return;
     try {
       await api(`/api/lists/${list.id}`, { method: 'PATCH', body: { name } });
       list.name = name.trim();
@@ -595,7 +1031,13 @@ async function renderList(id) {
     } catch (err) { fail(err); }
   });
   $('#deleteBtn').addEventListener('click', async () => {
-    if (!confirm(`Delete “${list.name}” and its ${plural(data.items.length, 'movie')}? This can’t be undone.`)) return;
+    const ok = await confirmDialog({
+      title: `Delete “${list.name}”?`,
+      message: `This removes the list and its ${plural(data.items.length, 'movie')} for both of you. It can’t be undone.`,
+      confirmLabel: 'Delete list',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api(`/api/lists/${list.id}`, { method: 'DELETE' });
       location.hash = '#/lists';
@@ -604,90 +1046,57 @@ async function renderList(id) {
 
   // --- add-by-name with live suggestions ---
   const input = $('#addInput');
-  const box = $('#suggest');
-  let results = [], hi = 0, seq = 0;
-  const onList = () => new Set(data.items.map((i) => i.movie.id));
-
-  const show = (html) => {
-    box.hidden = !html;
-    input.setAttribute('aria-expanded', String(!!html));
-    if (html) box.innerHTML = html;
-  };
-  const drawSuggest = () => {
-    if (!results.length) return show('');
-    const have = onList();
-    show(results.map((r, i) => `
-      <button type="button" role="option" data-i="${i}" class="${i === hi ? 'hi' : ''}" aria-selected="${i === hi}">
-        <span class="thumb">${poster(r, { mini: true })}</span>
-        <span class="spacer"><strong>${esc(r.title)}</strong> <span class="muted">${esc(r.year || '')}</span><span class="ov">${have.has(r.id) ? 'Already on this list' : esc(r.overview || '')}</span></span>
-        ${have.has(r.id) ? icon('check') : icon('plus')}
-      </button>`).join(''));
-    $$('button', box).forEach((b) => b.addEventListener('mousedown', (e) => { e.preventDefault(); add(results[Number(b.dataset.i)]); }));
-  };
-
-  const search = debounce(async () => {
-    const qv = input.value.trim();
-    const mine = ++seq;
-    if (qv.length < 2) { results = []; return drawSuggest(); }
-    show('<div class="hint">Searching…</div>');
-    try {
-      const { results: r } = await api(`/api/movies/search?q=${encodeURIComponent(qv)}`);
-      if (mine !== seq) return;
-      results = r; hi = 0;
-      if (r.length) drawSuggest();
-      else show(`<div class="hint">No movies match “${esc(qv)}”. Check the spelling, or try fewer words.</div>`);
-    } catch (err) { fail(err); }
-  }, 220);
-
-  async function add(pick) {
-    const title = input.value.trim();
-    if (!pick && !title) return;
-    input.disabled = true;
-    show('<div class="hint">Adding and pulling in cast, crew and trailer…</div>');
-    try {
-      const { item } = await api(`/api/lists/${list.id}/items`, { method: 'POST', body: pick ? { tmdbId: pick.id } : { title } });
+  attachAdder({
+    input,
+    box: $('#suggest'),
+    getListId: () => list.id,
+    haveIds: () => new Set(data.items.map((i) => i.movie.id)),
+    onAdded: async (item) => {
       toast(`Added ${item.movie.title}${item.movie.year ? ` (${item.movie.year})` : ''}`);
-      input.value = ''; results = []; show('');
       data = await api(`/api/lists/${list.id}`);
-      if (filter === 'watched') { filter = 'towatch'; $$('[data-f]').forEach((x) => x.classList.toggle('on', x.dataset.f === 'towatch')); }
+      if (filter === 'watched') {
+        filter = 'towatch';
+        $$('[data-f]').forEach((x) => { x.classList.toggle('on', x.dataset.f === 'towatch'); x.setAttribute('aria-pressed', String(x.dataset.f === 'towatch')); });
+      }
       drawGrid();
-    } catch (err) { fail(err); drawSuggest(); }
-    input.disabled = false;
-    input.focus();
-  }
-
-  input.addEventListener('input', search);
-  input.addEventListener('blur', () => setTimeout(() => show(''), 150));
-  input.addEventListener('focus', () => results.length && drawSuggest());
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowDown' && results.length) { hi = (hi + 1) % results.length; drawSuggest(); e.preventDefault(); }
-    else if (e.key === 'ArrowUp' && results.length) { hi = (hi - 1 + results.length) % results.length; drawSuggest(); e.preventDefault(); }
-    else if (e.key === 'Escape') show('');
-    else if (e.key === 'Enter') { e.preventDefault(); add(results[hi] || null); }
+    },
   });
   if (matchMedia('(pointer: fine)').matches) input.focus();
 }
 
 // ---------- movie detail ----------
+let modalOpener = null;
 function closeModal() {
   const m = $('#modal');
-  if (m.hidden) return;
-  m.hidden = true;
+  if (m.open) m.close();
+}
+$('#modal').addEventListener('close', () => {
   $('#modalBody').innerHTML = ''; // stops the trailer
   document.body.style.overflow = '';
-}
-$$('[data-close]').forEach((el) => el.addEventListener('click', closeModal));
-document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  if (!closeMenu()) closeModal();
+  if (modalOpener?.isConnected) modalOpener.focus();
+  modalOpener = null;
 });
+$('#modal').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeModal(); });
+$$('[data-close]').forEach((el) => el.addEventListener('click', closeModal));
+// Escape closes an open menu first (and keeps its dialog open); "/" opens "Add a movie".
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && closeMenu()) { e.preventDefault(); e.stopPropagation(); return; }
+  if (e.key === '/' && app.user && !app.user.mustChangePassword && !document.querySelector('dialog[open]') && !e.target.matches('input, select, textarea')) {
+    e.preventDefault();
+    openAddSheet();
+  }
+}, true);
 
 async function openMovie(id) {
   const modal = $('#modal');
   const body = $('#modalBody');
-  if (modal.hidden) body.innerHTML = '<div style="padding:2rem;display:flex;gap:1.5rem"><div class="skel" style="width:160px;aspect-ratio:2/3"></div><div style="flex:1"><div class="skel" style="height:40px;width:60%"></div><div class="skel" style="height:16px;width:40%;margin-top:1rem"></div><div class="skel" style="height:70px;margin-top:1rem"></div></div></div>';
-  modal.hidden = false;
-  document.body.style.overflow = 'hidden';
+  if (!modal.open) {
+    modalOpener = document.activeElement;
+    body.innerHTML = '<div style="padding:2rem;display:flex;gap:1.5rem"><div class="skel" style="width:160px;aspect-ratio:2/3"></div><div style="flex:1"><div class="skel" style="height:40px;width:60%"></div><div class="skel" style="height:16px;width:40%;margin-top:1rem"></div><div class="skel" style="height:70px;margin-top:1rem"></div></div></div>';
+    modal.showModal();
+    document.body.style.overflow = 'hidden';
+    $('.modal-close').focus();
+  }
   let data, lists;
   try {
     [data, { lists }] = await Promise.all([api(`/api/movies/${id}`), api('/api/lists')]);
@@ -769,7 +1178,7 @@ async function openMovie(id) {
   $('#tonightBtn')?.addEventListener('click', async () => {
     try {
       await api('/api/tonight', { method: 'POST', body: { movieId: data.tonight ? null : m.id } });
-      toast(data.tonight ? 'Tonight’s pick cleared' : `Tonight: ${m.title}`);
+      toast(data.tonight ? 'Tonight’s pick cleared' : `Tonight’s pick: ${m.title}`);
       refresh();
     } catch (err) { fail(err); }
   });
@@ -882,10 +1291,12 @@ async function renderRound(initial) {
 
   const drawSide = () => {
     const row = (m, extra = '') => `
-      <div class="mrow ${state.chosen?.id === m.id ? 'chosen' : ''}" data-movie="${m.id}">
-        ${poster(m, { mini: true })}
-        <div class="spacer"><div class="t">${esc(m.title)}</div><div class="s">${[m.year, fmtRuntime(m.runtime)].filter(Boolean).join(' · ')}${extra}</div></div>
-        <button class="btn ${state.chosen?.id === m.id ? '' : 'ghost'} small" data-choose="${m.id}" aria-pressed="${state.chosen?.id === m.id}">${state.chosen?.id === m.id ? `${icon('check')}Tonight` : 'Pick'}</button>
+      <div class="mrow ${state.chosen?.id === m.id ? 'chosen' : ''}">
+        <button type="button" class="row-open" data-movie="${m.id}" aria-label="${esc(m.title)}. Details and trailer">
+          ${poster(m, { mini: true })}
+          <span class="spacer"><span class="t">${esc(m.title)}</span><span class="s">${[m.year, fmtRuntime(m.runtime)].filter(Boolean).join(' · ')}${extra}</span></span>
+        </button>
+        <button class="btn ${state.chosen?.id === m.id ? '' : 'ghost'} small" data-choose="${m.id}" aria-pressed="${state.chosen?.id === m.id}">${state.chosen?.id === m.id ? `${icon('check')}Tonight’s pick` : 'Watch tonight'}</button>
       </div>`;
     const bothDone = state.myDone && state.partnerDone;
     const f = state.round.filters;
@@ -893,7 +1304,7 @@ async function renderRound(initial) {
     let html = `<h2>Matches <span class="count">${state.matches.length}</span></h2>`;
     if (filt) html += `<p class="hint">${esc(filt)}</p>`;
     html += `<div class="group">${state.matches.length
-      ? state.matches.map((m) => row(m)).join('') + (state.matches.length > 1 && !state.chosen ? `<button class="btn ghost block" id="spin" style="margin-top:0.75rem">${icon('dice')}Pick one for us</button>` : '')
+      ? state.matches.map((m) => row(m)).join('') + (state.matches.length > 1 && !state.chosen ? `<button class="btn ghost block" id="spin" style="margin-top:0.75rem">${icon('dice')}Choose one at random</button>` : '')
       : `<p class="hint">${bothDone ? 'No movie got two yeses this round.' : `When you and ${esc(pName)} both swipe right on a movie, it lands here.`}</p>`}</div>`;
     if (state.nearMisses.length && (bothDone || !state.matches.length)) {
       html += `<div class="group"><h2>Near misses</h2>
@@ -910,7 +1321,7 @@ async function renderRound(initial) {
     try {
       ({ state } = await api('/api/match/choose', { method: 'POST', body: { movieId: state.chosen?.id === movieId ? null : movieId } }));
       drawSide();
-      if (state.chosen) toast(`Tonight: ${state.chosen.title}`);
+      if (state.chosen) toast(`Tonight’s pick: ${state.chosen.title}`);
     } catch (err) { fail(err); }
   }
 
@@ -930,7 +1341,7 @@ async function renderRound(initial) {
         ${state.poolSize === 0
           ? `${icon('film')}<h2>Nothing to swipe</h2><p>No unwatched movies fit this round. Add some to your lists or loosen the filters.</p><button class="btn ghost" id="loosen">Change filters</button>`
           : state.partnerDone
-            ? `${icon('check')}<h2>Round complete</h2><p>${state.matches.length ? `You have ${plural(state.matches.length, 'match')}. Pick one for tonight.` : 'No movie got two yeses. The near misses are your best compromise.'}</p>`
+            ? `${icon('check')}<h2>Round complete</h2><p>${state.matches.length ? `You have ${plural(state.matches.length, 'match')}. Choose tonight’s pick from them.` : 'No movie got two yeses. The near misses are your best compromise.'}</p>`
             : `${icon('check')}<h2>You’re all done</h2><p>Waiting on ${esc(pName)} — ${state.partnerSwipes} of ${state.poolSize} swiped. New matches pop up here.</p>`}
       </div>`;
       $('#loosen')?.addEventListener('click', () => renderMatchSetup(state.round.filters));
@@ -1018,16 +1429,17 @@ async function renderRound(initial) {
   }
 
   function celebrate(m) {
-    $('.its-a-match')?.remove();
-    const el = document.createElement('div');
+    if ($('.its-a-match')) $('.its-a-match').close();
+    const el = document.createElement('dialog');
     el.className = 'its-a-match';
-    el.setAttribute('role', 'dialog');
     el.setAttribute('aria-label', 'It’s a match');
     el.innerHTML = `${poster(m)}<span class="label eyebrow">You both said yes</span><h1>It’s a match</h1>
       <p>You and ${esc(pName)} both want to watch <b>${esc(m.title)}</b>.</p>
-      <div class="row" style="justify-content:center"><button class="btn" data-pick>${icon('play')}Watch it tonight</button><button class="btn ghost" data-keep>Keep swiping</button></div>`;
+      <div class="row" style="justify-content:center"><button class="btn" data-pick>${icon('play')}Watch tonight</button><button class="btn ghost" data-keep>Keep swiping</button></div>`;
     document.body.appendChild(el);
-    const close = () => el.remove();
+    el.addEventListener('close', () => el.remove());
+    el.showModal();
+    const close = () => { if (el.open) el.close(); };
     app.cleanups.push(close);
     el.addEventListener('click', (e) => e.target === el && close());
     $('[data-keep]', el).addEventListener('click', close);
@@ -1040,7 +1452,8 @@ async function renderRound(initial) {
   $('#undoBtn').addEventListener('click', undo);
   $('#infoBtn').addEventListener('click', () => cards[0] && openMovie(cards[0].id));
   $('#endRound').addEventListener('click', async () => {
-    if (!confirm(`End this round for you and ${pName}?`)) return;
+    const ok = await confirmDialog({ title: 'End this round?', message: `Swipes and matches from this round end for you and ${pName}. Tonight’s pick stays.`, confirmLabel: 'End round' });
+    if (!ok) return;
     stopTimers();
     await api('/api/match/end', { method: 'POST' }).catch(fail);
     renderMatchSetup();
@@ -1048,7 +1461,7 @@ async function renderRound(initial) {
   $('#newRound').addEventListener('click', () => renderMatchSetup(state.round.filters));
 
   const onKey = (e) => {
-    if (!$('#modal').hidden || $('.its-a-match') || e.target.matches('input, select, textarea')) return;
+    if (document.querySelector('dialog[open]') || e.target.matches('input, select, textarea')) return;
     if (e.key === 'ArrowRight') swipe(true, true);
     else if (e.key === 'ArrowLeft') swipe(false, true);
     else if (e.key === 'ArrowUp') { e.preventDefault(); cards[0] && openMovie(cards[0].id); }

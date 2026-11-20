@@ -19,6 +19,7 @@
       <a href="#/match" data-nav="match">Match</a>
     </nav>
     <div class="who">
+      <button id="addBtn" class="btn small add-btn" type="button" aria-keyshortcuts="/"><span data-icon="plus"></span>Add a movie</button>
       <button id="meBtn" class="me-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Account">
         <span id="meAvatar"></span><span id="whoName"></span>
       </button>
@@ -28,17 +29,19 @@
   <nav id="tabbar" class="tabbar" aria-label="Main" hidden>
     <a href="#/" data-nav="dashboard"><span data-icon="home"></span>Home</a>
     <a href="#/match" data-nav="match"><span data-icon="heart"></span>Match</a>
+    <button id="addTab" type="button" class="tab-add"><span data-icon="plus"></span>Add</button>
     <a href="#/lists" data-nav="lists"><span data-icon="list"></span>Lists</a>
   </nav>
 
-  <div id="modal" class="modal" hidden>
-    <div class="modal-backdrop" data-close></div>
-    <div class="modal-card" role="dialog" aria-modal="true" aria-label="Movie details">
+  <!-- Native modal dialog: keeps keyboard focus inside, Escape closes, focus returns to the opener. -->
+  <dialog id="modal" class="modal" aria-label="Movie details">
+    <div class="modal-card">
       <button class="modal-close icon-btn" data-close aria-label="Close"></button>
       <div id="modalBody"></div>
     </div>
-  </div>
-  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </dialog>
+  <!-- Popover so messages stay visible above an open dialog. -->
+  <div id="toast" class="toast" role="status" aria-live="polite" popover="manual"></div>
 
   <script type="module" src="/app.js"></script>
 </body>

@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tx } from './db.js';
+import { hashPassword, verifyPassword, resetToTemporary, MIN_PASSWORD } from './passwords.js';
 
 const MAX_USERS = 2;
 const SESSION_DAYS = 30;
@@ -11,26 +12,14 @@ const COOKIE = 'mm_session';
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
 class HttpError extends Error {
-  constructor(status, message) {
+  /** field: which form field the error belongs to, so the UI can show it beside that field. */
+  constructor(status, message, field) {
     super(message);
     this.status = status;
+    this.field = field;
   }
 }
-const bad = (msg) => new HttpError(400, msg);
-
-// ---------- password hashing ----------
-function hashPassword(password) {
-  const salt = crypto.randomBytes(16);
-  const hash = crypto.scryptSync(password, salt, 64);
-  return `scrypt$${salt.toString('hex')}$${hash.toString('hex')}`;
-}
-function verifyPassword(password, stored) {
-  const [, saltHex, hashHex] = String(stored).split('$');
-  if (!saltHex || !hashHex) return false;
-  const expected = Buffer.from(hashHex, 'hex');
-  const actual = crypto.scryptSync(password, Buffer.from(saltHex, 'hex'), expected.length);
-  return crypto.timingSafeEqual(expected, actual);
-}
+const bad = (msg, field) => new HttpError(400, msg, field);
 
 function parseCookies(header = '') {
   const out = {};
@@ -58,12 +47,15 @@ export function createApp({ db, provider, secureCookies = false }) {
   const q = {
     userCount: db.prepare('SELECT COUNT(*) AS n FROM users'),
     userByName: db.prepare('SELECT * FROM users WHERE username = ?'),
-    userById: db.prepare('SELECT id, username, display_name FROM users WHERE id = ?'),
+    userById: db.prepare('SELECT id, username, display_name, must_change_password FROM users WHERE id = ?'),
+    userFullById: db.prepare('SELECT * FROM users WHERE id = ?'),
+    setPassword: db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?'),
+    signOutOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id = ? AND token != ?'),
     partnerOf: db.prepare('SELECT id, username, display_name FROM users WHERE id != ? ORDER BY id LIMIT 1'),
     insertUser: db.prepare('INSERT INTO users (username, display_name, password_hash) VALUES (?, ?, ?)'),
     insertSession: db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)'),
     sessionUser: db.prepare(
-      'SELECT u.id, u.username, u.display_name FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?'
+      'SELECT u.id, u.username, u.display_name, u.must_change_password FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?'
     ),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
     purgeSessions: db.prepare('DELETE FROM sessions WHERE expires_at <= ?'),
@@ -127,7 +119,12 @@ export function createApp({ db, provider, secureCookies = false }) {
   };
 
   // ---------- helpers ----------
-  const userDto = (u) => u && { id: u.id, username: u.username, displayName: u.display_name };
+  const userDto = (u) => u && {
+    id: u.id,
+    username: u.username,
+    displayName: u.display_name,
+    ...(u.must_change_password ? { mustChangePassword: true } : {}),
+  };
 
   function movieDto(row) {
     if (!row) return null;
@@ -349,6 +346,15 @@ export function createApp({ db, provider, secureCookies = false }) {
 
   const auth = (req, _res, next) => (req.user ? next() : next(new HttpError(401, 'Please sign in')));
 
+  // Someone signed in with a temporary password must choose a new one before using the app.
+  const PASSWORD_GATE_OPEN = new Set(['/api/status', '/api/auth/password', '/api/auth/logout', '/api/auth/login']);
+  app.use('/api', (req, _res, next) => {
+    if (req.user?.must_change_password && !PASSWORD_GATE_OPEN.has(req.baseUrl + req.path)) {
+      return next(new HttpError(403, 'Choose a new password to keep going'));
+    }
+    next();
+  });
+
   // ---------- auth routes ----------
   app.get('/api/status', (req, res) => {
     const n = q.userCount.get().n;
@@ -358,6 +364,7 @@ export function createApp({ db, provider, secureCookies = false }) {
       registrationOpen: n < MAX_USERS,
       mode: provider.mode,
       user: userDto(req.user),
+      partner: req.user ? userDto(q.partnerOf.get(req.user.id)) || null : null,
     });
   });
 
@@ -365,12 +372,12 @@ export function createApp({ db, provider, secureCookies = false }) {
     const username = String(req.body?.username || '').trim();
     const displayName = String(req.body?.displayName || '').trim() || username;
     const password = String(req.body?.password || '');
-    if (!/^[a-zA-Z0-9_.-]{2,32}$/.test(username)) throw bad('Username must be 2–32 letters, numbers, dots, dashes or underscores');
-    if (displayName.length > 40) throw bad('Display name is too long');
-    if (password.length < 6) throw bad('Password must be at least 6 characters');
+    if (!/^[a-zA-Z0-9_.-]{2,32}$/.test(username)) throw bad('Use 2–32 letters, numbers, dots, dashes or underscores', 'username');
+    if (displayName.length > 40) throw bad('Keep your name under 40 characters', 'displayName');
+    if (password.length < MIN_PASSWORD) throw bad(`Use at least ${MIN_PASSWORD} characters`, 'password');
     const user = tx(db, () => {
       if (q.userCount.get().n >= MAX_USERS) throw new HttpError(403, 'MovieMatch is for two people and both accounts already exist');
-      if (q.userByName.get(username)) throw new HttpError(409, 'That username is taken');
+      if (q.userByName.get(username)) throw new HttpError(409, 'That username is taken', 'username');
       const { lastInsertRowid } = q.insertUser.run(username, displayName, hashPassword(password));
       const id = Number(lastInsertRowid);
       ensureStarterLists(id, displayName);
@@ -388,6 +395,27 @@ export function createApp({ db, provider, secureCookies = false }) {
     q.purgeSessions.run(Date.now());
     startSession(res, u.id);
     res.json({ user: userDto(u) });
+  });
+
+  /** Change your password. The current one is not asked for only when signed in with a temporary password. */
+  app.post('/api/auth/password', auth, (req, res) => {
+    const u = q.userFullById.get(req.user.id);
+    const current = String(req.body?.currentPassword || '');
+    const next = String(req.body?.newPassword || '');
+    if (!u.must_change_password && !verifyPassword(current, u.password_hash)) throw bad('That’s not your current password', 'currentPassword');
+    if (next.length < MIN_PASSWORD) throw bad(`Use at least ${MIN_PASSWORD} characters`, 'newPassword');
+    if (verifyPassword(next, u.password_hash)) throw bad('Choose a password different from the old one', 'newPassword');
+    q.setPassword.run(hashPassword(next), u.id);
+    q.signOutOtherSessions.run(u.id, req.sessionToken || '');
+    res.json({ user: userDto(q.userById.get(u.id)) });
+  });
+
+  /** Reset your partner's forgotten password to a one-time temporary password, shown once. */
+  app.post('/api/partner/reset-password', auth, (req, res) => {
+    const partner = q.partnerOf.get(req.user.id);
+    if (!partner) throw new HttpError(404, 'There’s no second account yet');
+    const temporaryPassword = resetToTemporary(db, partner.id);
+    res.json({ partner: userDto(partner), temporaryPassword });
   });
 
   app.post('/api/auth/logout', (req, res) => {
@@ -576,6 +604,10 @@ export function createApp({ db, provider, secureCookies = false }) {
       }
     }
 
+    // Whose pick each film is, so Home keeps the two-person view below the hero.
+    const seatsOf = (id) => [myPicks.has(id) && 'me', theirPicks.has(id) && 'partner'].filter(Boolean);
+    for (const shelf of shelves) shelf.movies = shelf.movies.map((m) => ({ ...m, seats: seatsOf(m.id) }));
+
     res.json({
       tonight,
       feature,
@@ -679,7 +711,10 @@ export function createApp({ db, provider, secureCookies = false }) {
   app.use((err, _req, res, _next) => {
     const status = err.status || err.statusCode || 500;
     if (status >= 500) console.error(err);
-    res.status(status).json({ error: status >= 500 && !err.status ? 'Something went wrong' : err.message });
+    res.status(status).json({
+      error: status >= 500 && !err.status ? 'Something went wrong on our side. Try again in a moment.' : err.message,
+      ...(err.field ? { field: err.field } : {}),
+    });
   });
 
   return app;

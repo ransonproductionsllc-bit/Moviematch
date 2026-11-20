@@ -26,6 +26,17 @@ A private movie-list tracker for two people, with personal lists, shared lists, 
   5. Choose one match as **tonight's pick**, or press 🎲 to let the app choose from your matches.
   6. If you finish with no matches, the app shows **near misses** (movies only one of you liked) as possible compromises.
 - Mark a movie as watched. Watched movies are left out of later match rounds.
+- **Add a movie from anywhere.** Use the "Add a movie" button in the header, the + in the phone tab bar, or press `/`. Pick a list, type a title, and keep adding.
+- **Remove with undo.** Removing a film happens straight away, with an Undo button for a few seconds.
+
+## Forgotten passwords
+
+Only two accounts can exist, so a forgotten password can't be fixed by signing up again. There are two ways back in:
+
+- **In the app:** your partner taps their initials (top right), then **Reset your partner's password**. They get a one-time temporary password to give you. Signing in with it asks you to choose a new password before anything else works, and it signs you out on other devices.
+- **On the server:** if neither of you can sign in, run `npm run reset-password -- <username>`. It prints a one-time temporary password that works the same way.
+
+You can change your own password any time from the same menu.
 
 ## Quick start
 
@@ -109,5 +120,7 @@ npm test
 ```
 
 ---
+
+The staggered poster reveal and the inline form-error pattern are adapted from [Toggle Supply](https://www.toggle.supply/) (MIT License, Copyright (c) 2025 Toggle Supply).
 
 This product uses the TMDB API but is not endorsed or certified by TMDB. Titles are set in [Instrument Serif](https://github.com/Instrument/instrument-serif), bundled under the SIL Open Font License (`public/fonts/InstrumentSerif-OFL.txt`).

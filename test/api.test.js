@@ -204,3 +204,34 @@ test('tmdb helpers pick the official trailer and normalize credits', () => {
   assert.equal(m.certification, 'PG');
   assert.equal(m.poster_url, 'https://image.tmdb.org/t/p/w500/p.jpg');
 });
+
+test('forgotten password: partner reset, forced change, then normal sign-in', async () => {
+  // errors point at the field they belong to
+  const badName = await intruder('/api/auth/register', { method: 'POST', body: { username: 'x', password: 'secret3' } });
+  assert.equal(badName.status, 400);
+  assert.equal(badName.body.field, 'username');
+  const short = await alex('/api/auth/password', { method: 'POST', body: { currentPassword: 'secret1', newPassword: '123' } });
+  assert.equal(short.body.field, 'newPassword');
+  const wrong = await alex('/api/auth/password', { method: 'POST', body: { currentPassword: 'nope!!', newPassword: 'another1' } });
+  assert.equal(wrong.body.field, 'currentPassword');
+
+  // Sam resets Alex's password; Alex's old session is signed out
+  const r = await sam('/api/partner/reset-password', { method: 'POST' });
+  assert.equal(r.status, 200);
+  const temp = r.body.temporaryPassword;
+  assert.match(temp, /^[a-z]+-[a-z]+-\d{4}$/);
+  assert.equal((await alex('/api/dashboard')).status, 401);
+
+  // Signing in with the temporary password only allows choosing a new one
+  const login = await alex('/api/auth/login', { method: 'POST', body: { username: 'alex', password: temp } });
+  assert.equal(login.body.user.mustChangePassword, true);
+  assert.equal((await alex('/api/dashboard')).status, 403);
+  const changed = await alex('/api/auth/password', { method: 'POST', body: { newPassword: 'brand-new1' } });
+  assert.equal(changed.status, 200);
+  assert.equal(changed.body.user.mustChangePassword, undefined);
+  assert.equal((await alex('/api/dashboard')).status, 200);
+
+  // The new password works; the temporary one no longer does
+  assert.equal((await intruder('/api/auth/login', { method: 'POST', body: { username: 'alex', password: temp } })).status, 401);
+  assert.equal((await intruder('/api/auth/login', { method: 'POST', body: { username: 'alex', password: 'brand-new1' } })).status, 200);
+});
