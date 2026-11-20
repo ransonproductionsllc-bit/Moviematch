@@ -12,13 +12,12 @@ A private movie-list tracker for two people, with personal lists, shared lists, 
   - poster, backdrop, year, runtime, rating, age rating, genres and tagline
   - credits: director, writers and the main cast with photos
   - the trailer, playing inside the app (YouTube)
-- **Your own dashboard.** It shows:
-  - stats for each of you
-  - **"You both want to watch"**: movies that appear on both people's lists, so you already agree on them
-  - recently added movies
-  - all your lists
-  - a "taste check" comparing each person's favourite genres
-  - the status of the current match round
+- **Home (a "marquee" layout).**
+  - A large backdrop features tonight's pick. If nothing is picked yet, it features a film you both want, or one from your joint list, and the choice changes daily.
+  - **Watch tonight** sets the pick for both of you. **Play trailer** and **We watched it** follow; marking it watched clears the pick.
+  - The match button sits right beside it, showing how many movies you have left to swipe.
+  - Rows of posters follow. Your joint lists come first, then films on both your lists, then your partner's picks and yours (each film appears in only one row).
+  - At the bottom, a "taste check" compares each person's favourite genres.
 - **Match mode (Tinder-style).**
   1. One of you starts a round. You can limit it by mood (genres), maximum length, and which lists to use.
   2. You each swipe through the same set of unwatched movies taken from both people's lists. Drag the card, tap ✕ / ♥, or use the ← / → keys (↑ shows details, Backspace undoes).

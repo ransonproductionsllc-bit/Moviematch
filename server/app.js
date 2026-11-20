@@ -115,6 +115,12 @@ export function createApp({ db, provider, secureCookies = false }) {
       ON CONFLICT(round_id, user_id, movie_id) DO UPDATE SET liked = excluded.liked, created_at = datetime('now')`),
     deleteSwipe: db.prepare('DELETE FROM swipes WHERE round_id = ? AND user_id = ? AND movie_id = ?'),
     poolItems: db.prepare(`SELECT i.movie_id, i.list_id, i.watched FROM list_items i`),
+    getState: db.prepare('SELECT value FROM app_state WHERE key = ?'),
+    setState: db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
+    delState: db.prepare('DELETE FROM app_state WHERE key = ?'),
+    unwatchedOnList: db.prepare(`
+      SELECT i.movie_id, i.added_by FROM list_items i WHERE i.list_id = ? AND i.watched = 0
+      ORDER BY i.added_at DESC, i.id DESC LIMIT 20`),
     listPreview: db.prepare(`
       SELECT m.id, m.title, m.year, m.poster_url FROM list_items i JOIN movies m ON m.id = i.movie_id
       WHERE i.list_id = ? ORDER BY i.watched, i.added_at DESC, i.id DESC LIMIT 3`),
@@ -204,6 +210,20 @@ export function createApp({ db, provider, secureCookies = false }) {
   }
 
   const picksOf = (userId) => new Set(q.picks.all({ $u: userId }).map((r) => r.movie_id));
+
+  /** Tonight's pick, shared by both users. Cleared once the movie is marked watched. */
+  function getTonight() {
+    const row = q.getState.get('tonight');
+    if (!row) return null;
+    const t = JSON.parse(row.value);
+    const movie = q.movie.get(t.movieId);
+    if (!movie || q.watchedMovies.all().some((r) => r.movie_id === t.movieId)) return null;
+    return { movie: movieDto(movie), setBy: userDto(q.userById.get(t.setBy)) };
+  }
+  function setTonight(movieId, userId) {
+    if (movieId) q.setState.run('tonight', JSON.stringify({ movieId, setBy: userId, at: Date.now() }));
+    else q.delState.run('tonight');
+  }
 
   function ensureStarterLists(userId, displayName) {
     q.insertList.run(`${displayName}'s Watchlist`, 'personal', userId, userId);
@@ -403,8 +423,18 @@ export function createApp({ db, provider, secureCookies = false }) {
   app.post('/api/movies/:id/watched', auth, (req, res) => {
     const id = Number(req.params.id);
     if (!q.movie.get(id)) throw new HttpError(404, 'Movie not found');
-    q.markWatchedEverywhere.run(req.body?.watched === false ? 0 : 1, id);
+    const watched = req.body?.watched !== false;
+    q.markWatchedEverywhere.run(watched ? 1 : 0, id);
+    if (watched && getTonight()?.movie.id === id) setTonight(null);
     res.json({ ok: true });
+  });
+
+  /** Set or clear tonight's pick: { movieId } or { movieId: null }. */
+  app.post('/api/tonight', auth, (req, res) => {
+    const movieId = req.body?.movieId == null ? null : Number(req.body.movieId);
+    if (movieId && !q.movie.get(movieId)) throw new HttpError(404, 'Movie not found');
+    setTonight(movieId, req.user.id);
+    res.json({ tonight: getTonight() });
   });
 
   // ---------- lists ----------
@@ -508,7 +538,48 @@ export function createApp({ db, provider, secureCookies = false }) {
     const active = q.activeRound.get();
     const round = active ? publicState(roundState(active, me)) : null;
     const lists = q.listsVisible.all().map((l) => listDto(l, me));
+    const dto = (id) => movieDto(q.movie.get(id));
+    const tonight = getTonight();
+
+    // Rows of posters, joint lists first: that's the couple's curated list.
+    const shelves = [];
+    if (round?.matches.length) shelves.push({ key: 'matches', title: 'You both said yes', subtitle: 'From this match round', movies: round.matches });
+    for (const l of lists.filter((x) => x.kind === 'joint')) {
+      const movies = q.unwatchedOnList.all(l.id).map((r) => dto(r.movie_id)).filter(Boolean);
+      shelves.push({ key: `list-${l.id}`, title: l.name, subtitle: 'Joint list', listId: l.id, movies });
+    }
+    // Films already shown on a joint-list shelf aren't repeated in the per-person shelves.
+    const onJoint = new Set(shelves.filter((x) => x.key.startsWith('list-')).flatMap((x) => x.movies.map((m) => m.id)));
+    if (overlap.length) shelves.push({ key: 'overlap', title: 'On both your lists', subtitle: 'Already agreed', movies: overlap });
+    if (partner) {
+      const theirs = [...theirPicks].filter((id) => !myPicks.has(id) && !watched.has(id) && !onJoint.has(id)).map(dto).filter(Boolean);
+      shelves.push({ key: 'partner', title: `${partner.display_name.split(' ')[0]}’s picks`, subtitle: 'Not on your lists yet', partner: true, movies: theirs });
+    }
+    const mineOnly = [...myPicks].filter((id) => !theirPicks.has(id) && !watched.has(id) && !onJoint.has(id)).map(dto).filter(Boolean);
+    shelves.push({ key: 'mine', title: 'Your picks', subtitle: partner ? `Not on ${partner.display_name.split(' ')[0]}’s lists yet` : '', movies: mineOnly });
+
+    // The marquee: tonight's pick if set, otherwise something you both want,
+    // then something from a joint list. Rotates daily so it doesn't go stale.
+    let feature = null;
+    if (!tonight) {
+      const jointShelf = shelves.find((x) => x.key.startsWith('list-') && x.movies.length);
+      const pools = [
+        ['both', 'On both your lists', overlap],
+        ['joint', jointShelf ? `From ${jointShelf.title}` : '', jointShelf?.movies || []],
+        ['any', 'From your lists', shelves.flatMap((x) => x.movies)],
+      ];
+      const day = Math.floor(Date.now() / 864e5);
+      for (const [reason, label, pool] of pools) {
+        const withArt = pool.filter((m) => m.backdropUrl || m.posterUrl);
+        const pick = (withArt.length ? withArt : pool)[day % Math.max(1, (withArt.length ? withArt : pool).length)];
+        if (pick) { feature = { reason, label, movie: pick }; break; }
+      }
+    }
+
     res.json({
+      tonight,
+      feature,
+      shelves: shelves.filter((x) => x.movies.length || x.key.startsWith('list-')),
       me: userDto(me),
       partner: userDto(partner),
       mode: provider.mode,
@@ -588,6 +659,8 @@ export function createApp({ db, provider, secureCookies = false }) {
     const movieId = req.body?.movieId == null ? null : Number(req.body.movieId);
     if (movieId && !q.movie.get(movieId)) throw new HttpError(404, 'Movie not found');
     q.chooseRound.run(movieId, round.id);
+    if (movieId) setTonight(movieId, req.user.id);
+    else if (getTonight()?.movie.id === round.chosen_movie_id) setTonight(null);
     res.json({ state: publicState(roundState(q.round.get(round.id), req.user)) });
   });
 

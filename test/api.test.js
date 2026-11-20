@@ -146,6 +146,31 @@ test('round filters and watched movies narrow the pool', async () => {
   assert.equal(r.body.state.poolSize, 7);
 });
 
+test('home marquee: joint list shelf first, tonight’s pick set and cleared', async () => {
+  let { body } = await sam('/api/dashboard');
+  assert.equal(body.tonight?.movie.title, 'Knives Out', 'choosing a match sets tonight’s pick');
+  await sam('/api/tonight', { method: 'POST', body: { movieId: null } });
+  ({ body } = await sam('/api/dashboard'));
+  const firstList = body.shelves.find((s) => s.key.startsWith('list-'));
+  assert.ok(firstList && firstList.movies.some((m) => m.title === 'Arrival'), 'joint list shelf present');
+  assert.ok(body.shelves.findIndex((s) => s.key.startsWith('list-')) < body.shelves.findIndex((s) => s.key === 'mine'));
+  assert.ok(body.feature?.movie, 'a featured movie is offered');
+
+  const pick = body.feature.movie;
+  let r = await sam('/api/tonight', { method: 'POST', body: { movieId: pick.id } });
+  assert.equal(r.body.tonight.movie.id, pick.id);
+  ({ body } = await alex('/api/dashboard'));
+  assert.equal(body.tonight.movie.id, pick.id);
+  assert.equal(body.tonight.setBy.displayName, 'Sam');
+  assert.equal(body.feature, null);
+
+  await alex(`/api/movies/${pick.id}/watched`, { method: 'POST', body: { watched: true } });
+  ({ body } = await alex('/api/dashboard'));
+  assert.equal(body.tonight, null, 'watching it clears tonight’s pick');
+  await alex(`/api/movies/${pick.id}/watched`, { method: 'POST', body: { watched: false } });
+  assert.equal((await alex('/api/tonight', { method: 'POST', body: { movieId: 999999 } })).status, 404);
+});
+
 test('TMDB failures never leak the API key', async () => {
   const secret = 'not-a-real-key-123';
   const offline = createProvider({ apiKey: secret, fetchImpl: async (url) => { throw new Error(`fetch failed ${url}`); } });

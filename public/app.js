@@ -219,52 +219,77 @@ async function renderAuth() {
 }
 
 // ---------- dashboard ----------
-function tonightPanel(d) {
-  const r = d.round;
-  const pName = d.partner ? firstName(d.partner) : 'your partner';
-  if (!d.partner) {
-    return `<section class="tonight">
-      <div><h2>Waiting for your second seat</h2><p>Your partner can create their account from this same address. Until then, start filling your lists.</p></div>
-      <a class="btn ghost" href="#/lists">${icon('plus')}Add movies</a>
-    </section>`;
-  }
-  if (!r) {
-    return `<section class="tonight">
-      <div><h2>Can’t agree on a movie?</h2><p>Swipe through both your lists together. Anything you both like becomes a match.</p></div>
-      <a class="btn" href="#/match">${icon('heart')}Start matching</a>
-    </section>`;
-  }
-  const left = r.poolSize - r.mySwipes;
-  const meter = (label, n, cls) => `<div class="meter ${cls}"><span>${label} · ${n}/${r.poolSize}</span><div class="track"><div class="fill" style="width:${r.poolSize ? (n / r.poolSize) * 100 : 0}%"></div></div></div>`;
-  const head = r.chosen
-    ? `<div class="chosen">${poster(r.chosen, { mini: true })}<div><span class="label">Tonight’s pick</span><h2>${esc(r.chosen.title)}</h2><p>${[r.chosen.year, fmtRuntime(r.chosen.runtime)].filter(Boolean).join(' · ')}</p></div></div>`
-    : `<div><h2>${r.matches.length ? `${plural(r.matches.length, 'match')} so far` : 'Match round in progress'}</h2>
-        <p>${r.matches.length ? 'Pick one for tonight, or keep swiping for more.' : r.myDone ? `You’re done — waiting on ${esc(pName)}.` : `${plural(left, 'movie')} left for you to swipe.`}</p>
-        <div class="bars">${meter('You', r.mySwipes, '')}${meter(esc(pName), r.partnerSwipes, 'partner')}</div></div>`;
-  const cta = r.myDone || r.chosen
-    ? `<a class="btn ${r.chosen ? 'ghost' : ''}" href="#/match">${r.chosen ? 'Open round' : 'See matches'}</a>`
-    : `<a class="btn" href="#/match">${icon('heart')}Keep swiping</a>`;
-  const picks = r.matches.length && !r.chosen
-    ? `<div class="picks">${r.matches.map((m) => `<div data-movie="${m.id}" title="${esc(m.title)}">${poster(m, { mini: true })}</div>`).join('')}</div>`
-    : '';
-  return `<section class="tonight">${head}${cta}${picks}</section>`;
-}
-
+// ---------- home: marquee + shelves ----------
 function movieCard(m, { sub = '', by = '' } = {}) {
   return `<div class="mcard" data-movie="${m.id}">${poster(m, { score: true })}
     <div class="t">${esc(m.title)}</div>
     ${sub ? `<div class="s">${sub}</div>` : ''}${by}</div>`;
 }
 
+/** Big backdrop at the top of Home: tonight's pick, or something you'd both enjoy. */
+function marquee(d) {
+  const pName = d.partner ? firstName(d.partner) : null;
+  const r = d.round;
+  const m = d.tonight?.movie || d.feature?.movie;
+  if (!m) {
+    return `<section class="marquee empty-marquee"><div class="copy">
+      <span class="eyebrow">${icon('film')}Welcome</span>
+      <h1>Start your movie list</h1>
+      <p class="facts">Add a few titles you both want to see. The best of them shows up here.</p>
+      <div class="actions"><a class="btn" href="#/lists">${icon('plus')}Add movies</a></div>
+    </div></section>`;
+  }
+  const hue = (m.id * 47) % 360;
+  const art = m.backdropUrl
+    ? `<img class="bg" src="${esc(m.backdropUrl)}" alt="" />`
+    : m.posterUrl
+      ? `<img class="bg blur" src="${esc(m.posterUrl)}" alt="" />`
+      : `<div class="bg" style="background:radial-gradient(120% 90% at 70% 10%,hsl(${hue} 32% 30%),hsl(${(hue + 25) % 360} 28% 10%) 70%)"></div>`;
+  const facts = [m.rating && `${STAR} ${m.rating.toFixed(1)}`, m.year, fmtRuntime(m.runtime), m.genres[0] && esc(m.genres[0])]
+    .filter(Boolean).map((x) => `<span>${x}</span>`).join('');
+  const matchBtn = r
+    ? `<a class="btn ghost" href="#/match">${icon('heart')}${r.myDone ? 'See matches' : `Keep swiping · ${r.poolSize - r.mySwipes} left`}</a>`
+    : `<a class="btn ghost" href="#/match">${icon('heart')}Match instead</a>`;
+
+  let eyebrow, actions;
+  if (d.tonight) {
+    const by = d.tonight.setBy && d.tonight.setBy.id !== d.me.id ? ` · picked by ${esc(firstName(d.tonight.setBy))}` : '';
+    eyebrow = `${icon('play')}Tonight’s pick${by}`;
+    actions = `<button class="btn" data-trailer="${m.id}">${icon('play')}Play trailer</button>
+      <button class="btn ghost" data-watched="${m.id}">${icon('check')}We watched it</button>
+      <button class="btn quiet small" data-clear>Change pick</button>`;
+  } else {
+    eyebrow = `${icon(d.feature.reason === 'both' ? 'users' : 'film')}${esc(d.feature.label)}`;
+    actions = `<button class="btn" data-tonight="${m.id}">${icon('play')}Watch tonight</button>${matchBtn}`;
+  }
+  return `<section class="marquee">${art}
+    <div class="copy">
+      <span class="eyebrow">${eyebrow}</span>
+      <h1 data-movie="${m.id}">${esc(m.title)}</h1>
+      <div class="facts">${facts}</div>
+      ${m.overview ? `<p class="overview">${esc(m.overview)}</p>` : ''}
+      <div class="actions">${actions}</div>
+    </div>
+  </section>`;
+}
+
+function shelf(s, d) {
+  const isList = s.key.startsWith('list-');
+  const more = isList ? `<a class="btn quiet small" href="#/lists/${s.listId}">See all ${icon('right')}</a>` : '';
+  const body = s.movies.length
+    ? `<div class="strip">${s.movies.map((m) => movieCard(m, { sub: [m.year, fmtRuntime(m.runtime)].filter(Boolean).join(' · ') })).join('')}</div>`
+    : `<a class="empty shelf-empty" href="#/lists/${s.listId}">${icon('plus')}<strong>Nothing here yet</strong>Add the movies you both want to see.</a>`;
+  const sub = s.subtitle ? `<span class="muted small ${s.partner ? 'seat-partner' : ''}">${esc(s.subtitle)}</span>` : '';
+  return `<section class="section shelf">
+    <div class="section-head"><h2>${esc(s.title)}</h2>${sub}<span class="spacer"></span>${more}</div>
+    ${body}
+  </section>`;
+}
+
 async function renderDashboard() {
   const d = await api('/api/dashboard');
   const pName = d.partner ? firstName(d.partner) : null;
   const meName = firstName(d.me);
-  const groups = [
-    ...d.lists.filter((l) => l.kind === 'joint'),
-    ...d.lists.filter((l) => l.mine),
-    ...d.lists.filter((l) => l.kind === 'personal' && !l.mine),
-  ];
   const tasteBars = (rows, cls) => {
     if (!rows.length) return '<p class="muted small">No picks yet.</p>';
     const max = Math.max(...rows.map((x) => x.count));
@@ -272,36 +297,10 @@ async function renderDashboard() {
   };
 
   view.innerHTML = `
-    <div class="home-head">
-      <h1 class="title-xl spacer">Tonight</h1>
-      <p class="meta"><span class="seat-me"><b>${esc(meName)}</b> ${d.stats.myPicks} picks</span>${d.partner ? ` · <span class="seat-partner"><b>${esc(pName)}</b> ${d.stats.partnerPicks} picks</span>` : ''} · ${d.stats.watched} watched</p>
-    </div>
-
-    ${tonightPanel(d)}
-
-    <section class="section">
-      <div class="section-head"><h2>On both your lists</h2><span class="muted small">${d.overlap.length ? 'Already agreed — no swiping needed' : ''}</span></div>
-      ${d.overlap.length
-        ? `<div class="strip">${d.overlap.map((m) => movieCard(m, { sub: [m.year, fmtRuntime(m.runtime)].filter(Boolean).join(' · ') })).join('')}</div>`
-        : `<div class="empty">${icon('users')}<strong>Nothing in common yet</strong>When you both add the same movie, it shows up here.</div>`}
-    </section>
-
-    <section class="section">
-      <div class="section-head"><h2>Recently added</h2></div>
-      ${d.recent.length
-        ? `<div class="strip">${d.recent.map((i) => movieCard(i.movie, {
-            sub: `${esc(i.listName)}`,
-            by: `<div class="s by ${i.addedBy === d.me.id ? 'me' : ''}">${i.addedBy === d.me.id ? 'You' : esc(i.addedByName || '')} · ${timeAgo(i.addedAt)}</div>`,
-          })).join('')}</div>`
-        : `<div class="empty">${icon('film')}<strong>No movies yet</strong><a href="#/lists">Open a list</a> and type a title to add one.</div>`}
-    </section>
-
-    <section class="section">
-      <div class="section-head"><h2>Lists</h2><span class="spacer"></span><a class="btn quiet small" href="#/lists">All lists ${icon('right')}</a></div>
-      <div class="list-rows">${groups.map(listRow).join('')}</div>
-    </section>
-
-    ${d.partner ? `<section class="section">
+    ${marquee(d)}
+    ${!d.partner ? `<p class="notice">${icon('user')}Waiting for your partner — they can create the second account from this same address.</p>` : ''}
+    ${d.shelves.map((s) => shelf(s, d)).join('')}
+    ${d.partner && (d.tastes.me.length || d.tastes.partner.length) ? `<section class="section">
       <div class="section-head"><h2>Taste check</h2><span class="muted small">Top genres in each of your picks</span></div>
       <div class="taste">
         <div><h3 class="seat-me">${esc(meName)}</h3>${tasteBars(d.tastes.me, '')}</div>
@@ -309,6 +308,25 @@ async function renderDashboard() {
       </div>
     </section>` : ''}`;
   bindMovieClicks(view);
+
+  const setTonight = async (movieId, msg) => {
+    try {
+      await api('/api/tonight', { method: 'POST', body: { movieId } });
+      if (msg) toast(msg);
+      renderDashboard();
+    } catch (err) { fail(err); }
+  };
+  $('[data-tonight]')?.addEventListener('click', (e) =>
+    setTonight(Number(e.currentTarget.dataset.tonight), `Tonight: ${d.feature.movie.title}`));
+  $('[data-clear]')?.addEventListener('click', () => setTonight(null));
+  $('[data-trailer]')?.addEventListener('click', (e) => openMovie(Number(e.currentTarget.dataset.trailer)));
+  $('[data-watched]')?.addEventListener('click', async (e) => {
+    try {
+      await api(`/api/movies/${e.currentTarget.dataset.watched}/watched`, { method: 'POST', body: { watched: true } });
+      toast(`Marked ${d.tonight.movie.title} as watched`);
+      renderDashboard();
+    } catch (err) { fail(err); }
+  });
 }
 
 function listRow(l) {

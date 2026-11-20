@@ -83,6 +83,12 @@ export function openDb(dbPath) {
       PRIMARY KEY (round_id, user_id, movie_id)
     );
 
+    -- Small shared key/value state (e.g. tonight's pick)
+    CREATE TABLE IF NOT EXISTS app_state (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_items_movie ON list_items(movie_id);
     CREATE INDEX IF NOT EXISTS idx_swipes_movie ON swipes(round_id, movie_id);
   `);
