@@ -1,0 +1,17 @@
+{
+  "name": "moviematch",
+  "version": "1.0.0",
+  "description": "Two-person movie list tracker with joint lists, TMDB details/trailers, and Tinder-style matching.",
+  "private": true,
+  "type": "module",
+  "main": "server/index.js",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server/index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}

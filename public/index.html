@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>MovieMatch</title>
+  <meta name="theme-color" content="#0f0d14" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍿</text></svg>" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="banner" class="banner" hidden></div>
+  <header id="topbar" class="topbar" hidden>
+    <a href="#/" class="brand">🍿 <span>MovieMatch</span></a>
+    <nav class="nav">
+      <a href="#/" data-nav="dashboard">Dashboard</a>
+      <a href="#/lists" data-nav="lists">Lists</a>
+      <a href="#/match" data-nav="match">Match</a>
+    </nav>
+    <div class="who">
+      <span id="whoName"></span>
+      <button id="logoutBtn" class="btn ghost small">Sign out</button>
+    </div>
+  </header>
+  <main id="view" class="view"></main>
+
+  <div id="modal" class="modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card" role="dialog" aria-modal="true">
+      <button class="modal-close" data-close aria-label="Close">✕</button>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
