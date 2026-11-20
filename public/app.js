@@ -1492,40 +1492,64 @@ async function renderRound(initial) {
   drawProgress(); drawSide(); drawDeck();
 }
 
-/** Pointer-based drag-to-swipe for the top card. */
+/**
+ * Drag-to-swipe for the top card (after Emil Kowalski's gestures guidance):
+ * the card tracks the finger 1:1, a fast flick counts as a swipe, the card leaves
+ * at the speed it was thrown, and only the first finger counts.
+ */
 function attachDrag(el, onSwipe) {
   if (!el) return;
-  let startX = 0, startY = 0, dx = 0, dy = 0, dragging = false;
+  let startX = 0, startY = 0, dx = 0, dy = 0, travel = 0, pointer = null;
+  let samples = []; // recent [time, x] pairs for release velocity
   const yes = $('.stamp.yes', el), no = $('.stamp.no', el);
+  const FLICK = 0.35; // px per ms
+  const DISTANCE = 100; // px
+
   el.addEventListener('pointerdown', (e) => {
-    dragging = true;
-    startX = e.clientX; startY = e.clientY; dx = dy = 0;
+    if (pointer !== null) return; // a second finger never hijacks the drag
+    pointer = e.pointerId;
+    // A running entrance or hint animation would override the drag, so stop it the moment the card is grabbed.
+    el.getAnimations().forEach((a) => a.cancel());
+    el.classList.remove('nudge', 'promote');
+    startX = e.clientX; startY = e.clientY; dx = dy = travel = 0;
+    samples = [[e.timeStamp, e.clientX]];
     el.setPointerCapture(e.pointerId);
     el.style.transition = 'none';
     el.style.cursor = 'grabbing';
   });
   el.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
+    if (e.pointerId !== pointer) return;
     dx = e.clientX - startX; dy = e.clientY - startY;
+    travel = Math.max(travel, Math.hypot(dx, dy));
+    samples.push([e.timeStamp, e.clientX]);
+    while (samples.length > 2 && e.timeStamp - samples[0][0] > 100) samples.shift();
     el.style.transform = `translate(${dx}px, ${dy * 0.25}px) rotate(${dx / 20}deg)`;
     yes.style.opacity = Math.max(0, Math.min(1, dx / 90));
     no.style.opacity = Math.max(0, Math.min(1, -dx / 90));
   });
-  const end = () => {
-    if (!dragging) return;
-    dragging = false;
+  const end = (e) => {
+    if (e.pointerId !== pointer) return;
+    pointer = null;
     el.style.cursor = '';
-    if (Math.abs(dx) > 100) {
+    const [t0, x0] = samples[0];
+    const dt = Math.max(1, e.timeStamp - t0);
+    const v = (e.clientX - x0) / dt; // px per ms over the last ~100ms
+    const flicked = e.type !== 'pointercancel' && Math.abs(v) > FLICK && Math.abs(dx) > 20 && Math.sign(v) === Math.sign(dx);
+    if (e.type !== 'pointercancel' && (Math.abs(dx) > DISTANCE || flicked)) {
       const liked = dx > 0;
-      el.style.transition = 'transform .26s cubic-bezier(.3,.6,.4,1), opacity .26s';
+      // Leave at the speed it was thrown: faster flick, shorter exit.
+      const ms = Math.round(Math.max(140, Math.min(300, 520 / Math.max(Math.abs(v), 1.2))));
+      el.style.transition = `transform ${ms}ms cubic-bezier(0.23, 1, 0.32, 1), opacity ${ms}ms ease-out`;
       el.style.transform = `translate(${liked ? 640 : -640}px, ${dy * 0.6}px) rotate(${liked ? 24 : -24}deg)`;
       el.style.opacity = '0';
-      setTimeout(() => onSwipe(liked), 170);
+      setTimeout(() => onSwipe(liked), Math.round(ms * 0.65));
     } else {
-      el.style.transition = 'transform .35s cubic-bezier(.2,1.4,.4,1)';
+      // Snap back quickly; a small settle only because the finger applied force.
+      el.style.transition = 'transform 0.3s cubic-bezier(0.2, 1.3, 0.4, 1)';
       el.style.transform = '';
       yes.style.opacity = no.style.opacity = 0;
-      if (Math.abs(dx) < 5 && Math.abs(dy) < 5) openMovie(Number(el.dataset.id));
+      // A tap opens details; a drag that came back to where it started does not.
+      if (e.type !== 'pointercancel' && travel < 6) openMovie(Number(el.dataset.id));
     }
   };
   el.addEventListener('pointerup', end);
